@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>仮想スクロールのSPA</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; font: 16px system-ui; }
+  header { height: 56px; background: #0b5; color: #fff; display: flex; align-items: center; padding: 0 16px; }
+  .list { position: absolute; top: 56px; bottom: 0; left: 0; right: 0; overflow-y: auto; }
+  .row { position: absolute; left: 0; right: 0; height: 48px; box-sizing: border-box; padding: 12px 16px; border-bottom: 1px solid #ddd; }
+  .row:nth-child(even) { background: #f6fff9; }
+</style></head>
+<body>
+<header>仮想スクロール（見えている行だけ DOM に存在する。500 行）</header>
+<div class="list" id="list"><div id="spacer" style="position:relative"></div></div>
+<script>
+  // 表示範囲の外の行は DOM から消える（仮想スクロール）。
+  const ROWS = 500, H = 48;
+  const list = document.getElementById('list'), spacer = document.getElementById('spacer');
+  spacer.style.height = ROWS * H + 'px';
+  function render() {
+    const from = Math.max(0, Math.floor(list.scrollTop / H) - 5);
+    const to = Math.min(ROWS, Math.ceil((list.scrollTop + list.clientHeight) / H) + 5);
+    spacer.innerHTML = '';
+    for (let i = from; i < to; i++) {
+      const r = document.createElement('div');
+      r.className = 'row'; r.style.top = i * H + 'px';
+      r.textContent = `行 ${i + 1} / ${ROWS}`;
+      spacer.appendChild(r);
+    }
+  }
+  list.addEventListener('scroll', render);
+  window.addEventListener('resize', render);
+  render();
+</script>
+</body></html>

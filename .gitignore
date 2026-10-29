@@ -1,0 +1,4 @@
+node_modules/
+dist/
+spike-output/
+.DS_Store

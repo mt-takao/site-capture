@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><title>通信と画面更新が止まらないページ</title>
+<style>body { font: 16px system-ui; padding: 24px; } .content { height: 2000px; background: linear-gradient(#fff,#fdd); }</style></head>
+<body>
+<h1>通信と画面更新が止まらないページ</h1>
+<p>時計: <span id="clock"></span>（1 秒ごとに更新） / ポーリング回数: <span id="polls">0</span></p>
+<div class="content" id="content">本文は 1.5 秒後に表示されます</div>
+<script>
+  // 1 秒ごとに時計を書き換え、0.5 秒ごとに同じ URL へ通信する。どちらも止まらない。
+  setInterval(() => { document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }, 1000);
+  let n = 0;
+  setInterval(() => { fetch('/poll?t=' + Date.now()).finally(() => { document.getElementById('polls').textContent = ++n; }); }, 500);
+  setTimeout(() => { document.getElementById('content').textContent = '本文が表示されました'; }, 1500);
+</script>
+</body></html>

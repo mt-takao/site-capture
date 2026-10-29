@@ -1,0 +1,8 @@
+{
+  "name": "site-capture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "spike": "pnpm --filter @site-capture/server spike"
+  }
+}
