@@ -8,6 +8,8 @@ import { createServer } from 'node:http';
 //   /spa               0.15秒後に JavaScript でリンクが追加される
 //   /redirect          /about/ へ転送（重複として扱われる）
 //   /broken            404 を返す HTML
+//   /members           Cookie（session=ok）がないと /login に転送される会員ページ
+//   /basic             Basic 認証（user / pass）が必要なページ
 
 export const BLOG_POSTS = 8;
 
@@ -47,6 +49,29 @@ export async function startSiteServer(port = 0): Promise<{ origin: string; reque
     if (p === '/files/doc.pdf') {
       res.writeHead(200, { 'content-type': 'application/pdf' });
       return void res.end('%PDF-1.4');
+    }
+    if (p === '/members') {
+      if (!/(^|;\s*)session=ok(;|$)/.test(req.headers.cookie ?? '')) {
+        res.writeHead(302, { location: '/login?next=/members' });
+        return void res.end();
+      }
+      return html(200, page('会員ページ', ['/members/profile']));
+    }
+    if (p === '/members/profile') {
+      if (!/(^|;\s*)session=ok(;|$)/.test(req.headers.cookie ?? '')) {
+        res.writeHead(302, { location: '/login?next=/members/profile' });
+        return void res.end();
+      }
+      return html(200, page('会員情報', ['/members']));
+    }
+    if (p === '/login') return html(200, page('ログイン', []));
+    if (p === '/basic') {
+      const expected = `Basic ${Buffer.from('user:pass').toString('base64')}`;
+      if (req.headers.authorization !== expected) {
+        res.writeHead(401, { 'www-authenticate': 'Basic realm="test"', 'content-type': 'text/html; charset=utf-8' });
+        return void res.end(page('認証が必要です', []));
+      }
+      return html(200, page('Basic認証のページ', []));
     }
     if (p === '/redirect') {
       res.writeHead(302, { location: '/about/' });

@@ -39,10 +39,12 @@ export function crawlDetail(row: CrawlRow, store: Store): CrawlDetail {
   const site = settings.siteSettingsName
     ? (BUILTIN_PRESETS.find((p) => p.name === settings.siteSettingsName) ?? findSiteSettings(settings.startUrl))
     : findSiteSettings(settings.startUrl);
+  const profile = settings.authProfileId ? store.getAuthProfile(settings.authProfileId) : undefined;
   return {
     ...crawlSummary(row, store),
     settings,
     siteSettingsName: site.name,
+    authProfileName: profile?.name ?? null,
     outputDir: row.output_dir,
     errorMessage: row.error_message,
   };

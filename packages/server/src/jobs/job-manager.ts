@@ -1,8 +1,11 @@
-import type { Browser } from 'playwright';
+import { existsSync } from 'node:fs';
+import type { Browser, BrowserContextOptions } from 'playwright';
 import type { CrawlEvent, CrawlSettings } from '@site-capture/shared';
 import type { Store } from '../db/store.js';
 import { captureDir } from '../paths.js';
 import { CrawlRunner } from './crawl-runner.js';
+
+export class StartCrawlError extends Error {}
 
 // 撮影セッションを裏で実行し、進捗イベントを購読者（SSE の接続）に中継する。
 // ブラウザは最初の撮影のときに起動し、以降は使い回す
@@ -19,10 +22,15 @@ export class JobManager {
       captureDir(new URL(s.startUrl).hostname, new Date()),
   ) {}
 
-  async start(settings: CrawlSettings): Promise<{ crawlId: number; finished: Promise<void> }> {
+  async start(
+    settings: CrawlSettings,
+    secrets: { basicAuth?: { username: string; password: string } | null } = {},
+  ): Promise<{ crawlId: number; finished: Promise<void> }> {
+    const contextOptions = this.contextOptionsFor(settings, secrets.basicAuth ?? null);
     this.browser ??= this.launchBrowser();
     const browser = await this.browser;
-    const runner = new CrawlRunner({ store: this.store, browser, settings, outputDir: this.outputDirFor(settings) });
+    const runner = new CrawlRunner({ store: this.store, browser, settings, outputDir: this.outputDirFor(settings), contextOptions });
+    if (settings.authProfileId) this.store.touchAuthProfile(settings.authProfileId);
     const id = runner.crawlId;
     this.runners.set(id, runner);
     runner.subscribe((e) => {
@@ -34,6 +42,26 @@ export class JobManager {
     );
     void finished.finally(() => this.runners.delete(id));
     return { crawlId: id, finished };
+  }
+
+  // ログイン状態（L-01）と Basic 認証（L-04）をブラウザコンテキストの設定にする
+  private contextOptionsFor(
+    settings: CrawlSettings,
+    basicAuth: { username: string; password: string } | null,
+  ): BrowserContextOptions {
+    const options: BrowserContextOptions = {};
+    if (settings.authProfileId) {
+      const profile = this.store.getAuthProfile(settings.authProfileId);
+      if (!profile || !existsSync(profile.storage_state_path)) {
+        throw new StartCrawlError('選んだログイン状態が見つかりません。設定画面で作り直してください');
+      }
+      options.storageState = profile.storage_state_path;
+    }
+    if (basicAuth && basicAuth.username) {
+      // ID とパスワードは起点URLと同じオリジンにだけ送る。外部サイトへの通信に送らないため
+      options.httpCredentials = { ...basicAuth, origin: new URL(settings.startUrl).origin };
+    }
+    return options;
   }
 
   isRunning(id: number): boolean {

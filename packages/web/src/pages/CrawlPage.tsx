@@ -87,6 +87,7 @@ export function CrawlPage() {
             <span>開始 {formatDateTime(crawl.startedAt ?? crawl.createdAt)}</span>
             <span>所要時間 {formatDuration(crawl.startedAt, crawl.finishedAt)}</span>
             <span>サイト設定: {crawl.siteSettingsName}</span>
+            {crawl.settings.authProfileId && <span>ログイン状態: {crawl.authProfileName ?? '（削除済み）'}</span>}
           </div>
         </div>
         <div className={styles.headActions}>
@@ -113,7 +114,7 @@ export function CrawlPage() {
         <div className={styles.bar} role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
           <div className={`${styles.barFill} ${running ? '' : styles.barDone}`} style={{ width: `${running ? progress : 100}%` }} />
         </div>
-        {running && warnings.length > 0 && (
+        {warnings.length > 0 && (
           <ul className={styles.warnings}>
             {warnings.slice(-3).map((w, i) => (
               <li key={i}>{w}</li>

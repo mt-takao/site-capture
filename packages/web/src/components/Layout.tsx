@@ -20,6 +20,9 @@ export function Layout() {
           <NavLink to="/new" className={navClass}>
             新しく撮影
           </NavLink>
+          <NavLink to="/settings" className={navClass}>
+            設定
+          </NavLink>
         </nav>
       </header>
       <main className={styles.main}>

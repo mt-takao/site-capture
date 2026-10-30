@@ -19,3 +19,8 @@ function timestamp(d: Date): string {
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
+
+// ログイン状態（storageState）の保存先。Cookie が入るので、フォルダは本人だけが開ける権限にする
+export function authDir(root = dataRoot()): string {
+  return join(root, 'auth');
+}

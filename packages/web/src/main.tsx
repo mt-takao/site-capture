@@ -8,6 +8,7 @@ import { CrawlPage } from './pages/CrawlPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { NewCrawlPage } from './pages/NewCrawlPage';
 import { PageDetailPage } from './pages/PageDetailPage';
+import { SettingsPage } from './pages/SettingsPage';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -18,6 +19,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="new" element={<NewCrawlPage />} />
           <Route path="crawls/:id" element={<CrawlPage />} />
           <Route path="crawls/:id/pages/:pageId" element={<PageDetailPage />} />
+          <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<p className="muted">ページが見つかりません。</p>} />
         </Route>
       </Routes>

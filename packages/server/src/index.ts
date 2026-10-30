@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { buildServer } from './api/server.js';
+import { LoginSessionManager } from './auth/login-sessions.js';
 import { Store } from './db/store.js';
 import { JobManager } from './jobs/job-manager.js';
 import { dataRoot, databasePath } from './paths.js';
@@ -16,7 +17,11 @@ mkdirSync(dataRoot(), { recursive: true });
 const store = new Store(databasePath());
 const interrupted = store.markInterruptedCrawls();
 const jobs = new JobManager(store, () => chromium.launch());
-const app = await buildServer({ store, jobs, port, webDistDir });
+// ログイン用ブラウザは、利用者が手でログインできるよう画面ありで起動する（設計書 7.1）。
+// 動作確認で画面を出したくないときだけ SITE_CAPTURE_LOGIN_HEADLESS=1 で画面なしにする
+const loginHeadless = process.env.SITE_CAPTURE_LOGIN_HEADLESS === '1';
+const logins = new LoginSessionManager(store, () => chromium.launch({ headless: loginHeadless }));
+const app = await buildServer({ store, jobs, logins, port, webDistDir });
 
 await app.listen({ host: '127.0.0.1', port });
 const url = `http://127.0.0.1:${port}`;
@@ -31,6 +36,7 @@ process.on('SIGINT', async () => {
   if (closing) process.exit(130);
   closing = true;
   console.log('\n終了しています…（撮影中のページを撮り終えるまで待ちます。もう一度押すとすぐ終了）');
+  await logins.closeAll();
   await jobs.shutdown();
   await app.close();
   store.close();

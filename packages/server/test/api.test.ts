@@ -1,13 +1,14 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { chromium } from 'playwright';
-import type { CrawlDetail, CrawlSummary, PageItem, StreamMessage } from '@site-capture/shared';
+import type { AuthProfileItem, CrawlDetail, CrawlEvent, CrawlSummary, LoginSessionInfo, PageItem, StreamMessage } from '@site-capture/shared';
+import { LoginSessionManager } from '../src/auth/login-sessions.js';
 import { buildServer } from '../src/api/server.js';
 import { Store } from '../src/db/store.js';
 import { JobManager } from '../src/jobs/job-manager.js';
@@ -18,6 +19,7 @@ import { startSiteServer } from './helpers/site-server.js';
 let home: string;
 let store: Store;
 let jobs: JobManager;
+let logins: LoginSessionManager;
 let app: FastifyInstance;
 let port: number;
 let site: Awaited<ReturnType<typeof startSiteServer>>;
@@ -37,14 +39,17 @@ before(async () => {
   process.env.SITE_CAPTURE_HOME = home;
   store = new Store(join(home, 'test.db'));
   jobs = new JobManager(store, () => chromium.launch());
+  // テストではログイン用ブラウザも画面なしで起動する
+  logins = new LoginSessionManager(store, () => chromium.launch());
   port = await freePort();
-  app = await buildServer({ store, jobs, port, sseHeartbeatMs: 200 });
+  app = await buildServer({ store, jobs, logins, port, sseHeartbeatMs: 200 });
   await app.listen({ host: '127.0.0.1', port });
   base = `http://127.0.0.1:${port}`;
   site = await startSiteServer();
 });
 
 after(async () => {
+  await logins.closeAll();
   await jobs.shutdown();
   await app.close();
   store.close();
@@ -181,4 +186,97 @@ test('URL に合うサイト設定を返す', async () => {
   assert.equal(notion.body.intervalMs, 30000);
   const other = await api<{ name: string }>(`/api/site-settings/match?url=${encodeURIComponent('https://example.com/')}`);
   assert.equal(other.body.name, '標準');
+});
+
+// ---- ログイン（M4） ----
+
+async function crawlAndWait(body: Record<string, unknown>) {
+  const created = await api<CrawlDetail & { error?: string }>('/api/crawls', { method: 'POST', body: JSON.stringify(body) });
+  assert.equal(created.status, 201, created.body.error ?? "");
+  const events: CrawlEvent[] = [];
+  jobs.subscribe(created.body.id, (e) => events.push(e));
+  const detail = await waitUntilFinished(created.body.id);
+  const pages = (await api<PageItem[]>(`/api/crawls/${created.body.id}/pages`)).body;
+  return { detail, pages, events };
+}
+
+test('ログイン用ブラウザでログインした状態を保存し、その状態で会員ページを撮れる', async () => {
+  const opened = await api<LoginSessionInfo>('/api/auth-profiles/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ name: 'テスト会員', url: `${site.origin}/login` }),
+  });
+  assert.equal(opened.status, 201);
+  assert.equal(opened.body.status, 'open');
+  // 利用者が手でログインした結果を、Cookie を入れて再現する
+  await logins.contextOf(opened.body.id)!.addCookies([{ name: 'session', value: 'ok', url: site.origin }]);
+
+  const saved = await api<AuthProfileItem>(`/api/auth-profiles/sessions/${opened.body.id}/save`, { method: 'POST' });
+  assert.equal(saved.status, 201);
+  assert.equal(saved.body.name, 'テスト会員');
+  assert.equal(saved.body.origin, site.origin);
+  assert.equal((await api(`/api/auth-profiles/sessions/${opened.body.id}`)).status, 404);
+
+  // ファイルは本人だけが読み書きでき、フォルダは本人だけが開ける。中身にパスワードはなく Cookie だけ
+  const row = store.getAuthProfile(saved.body.id)!;
+  assert.equal((await stat(row.storage_state_path)).mode & 0o777, 0o600);
+  assert.equal((await stat(join(home, 'auth'))).mode & 0o777, 0o700);
+  assert.match(await readFile(row.storage_state_path, 'utf8'), /"name":\s*"session"/);
+  const list = await api<AuthProfileItem[]>('/api/auth-profiles');
+  assert.ok(list.body.some((p) => p.id === saved.body.id));
+
+  const r = await crawlAndWait(fastSettings({ startUrl: `${site.origin}/members`, authProfileId: saved.body.id, maxPages: 3 }));
+  const done = r.pages.filter((p) => p.status === 'done').map((p) => p.title).sort();
+  assert.deepEqual(done, ['会員ページ', '会員情報']);
+  assert.equal(r.detail.authProfileName, 'テスト会員');
+  assert.ok(!r.events.some((e) => e.type === 'warning'));
+  assert.ok(store.getAuthProfile(saved.body.id)!.last_used_at);
+
+  // 削除するとファイルも消える
+  assert.equal((await api(`/api/auth-profiles/${saved.body.id}`, { method: 'DELETE' })).status, 200);
+  assert.ok(!existsSync(row.storage_state_path));
+  assert.equal((await api(`/api/auth-profiles/${saved.body.id}`, { method: 'DELETE' })).status, 404);
+});
+
+test('ログインせずに会員ページを撮ると、ログイン画面に転送されたことを警告する', async () => {
+  const r = await crawlAndWait(fastSettings({ startUrl: `${site.origin}/members`, maxPages: 1 }));
+  const warning = r.events.find((e) => e.type === 'warning');
+  assert.ok(warning && warning.type === 'warning' && warning.message.includes('ログイン画面'));
+  assert.equal(r.pages[0]!.title, 'ログイン');
+});
+
+test('ブラウザを閉じた後は保存できず、分かるメッセージを返す', async () => {
+  const opened = await api<LoginSessionInfo>('/api/auth-profiles/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ name: '閉じる', url: `${site.origin}/login` }),
+  });
+  await logins.contextOf(opened.body.id)!.browser()!.close();
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal((await api<LoginSessionInfo>(`/api/auth-profiles/sessions/${opened.body.id}`)).body.status, 'closed');
+  const saved = await api<{ error: string }>(`/api/auth-profiles/sessions/${opened.body.id}/save`, { method: 'POST' });
+  assert.equal(saved.status, 400);
+  assert.match(saved.body.error, /閉じられた/);
+});
+
+test('ログイン用ブラウザの入力の誤りと、存在しないログイン状態の指定は 400 にする', async () => {
+  const noName = await api<{ error: string }>('/api/auth-profiles/sessions', { method: 'POST', body: JSON.stringify({ name: ' ', url: site.origin }) });
+  assert.equal(noName.status, 400);
+  const badUrl = await api<{ error: string }>('/api/auth-profiles/sessions', { method: 'POST', body: JSON.stringify({ name: 'x', url: 'ftp://x' }) });
+  assert.equal(badUrl.status, 400);
+  const missing = await api<{ error: string }>('/api/crawls', { method: 'POST', body: JSON.stringify(fastSettings({ authProfileId: 'nope' })) });
+  assert.equal(missing.status, 400);
+  assert.match(missing.body.error, /ログイン状態が見つかりません/);
+});
+
+test('Basic 認証の ID とパスワードは撮影に使うが、保存しない', async () => {
+  const withAuth = await crawlAndWait(
+    fastSettings({ startUrl: `${site.origin}/basic`, maxPages: 1, basicAuth: { username: 'user', password: 'pass' } }),
+  );
+  assert.equal(withAuth.pages[0]!.httpStatus, 200);
+  assert.equal(withAuth.pages[0]!.title, 'Basic認証のページ');
+  const row = store.getCrawl(withAuth.detail.id)!;
+  assert.ok(!row.settings_json.includes('basicAuth'));
+  assert.ok(!row.settings_json.includes('pass"'));
+
+  const without = await crawlAndWait(fastSettings({ startUrl: `${site.origin}/basic`, maxPages: 1 }));
+  assert.equal(without.pages[0]!.httpStatus, 401);
 });

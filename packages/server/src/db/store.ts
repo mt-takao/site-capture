@@ -41,6 +41,15 @@ export type PageRow = {
   wait_timed_out: number;
 };
 
+export type AuthProfileRow = {
+  id: string;
+  name: string;
+  origin: string;
+  storage_state_path: string;
+  created_at: string;
+  last_used_at: string | null;
+};
+
 export type ShotRow = {
   id: number;
   page_id: number;
@@ -224,5 +233,29 @@ export class Store {
          WHERE p.crawl_id = ? AND p.status = 'done' ORDER BY p.id, s.viewport_width DESC LIMIT 1`,
       )
       .get(crawlId) as ShotRow | undefined;
+  }
+
+  // ---- ログイン状態（設計書 7章、L-03） ----
+
+  createAuthProfile(p: { id: string; name: string; origin: string; storageStatePath: string }): void {
+    this.db
+      .prepare(`INSERT INTO auth_profiles (id, name, origin, storage_state_path, created_at) VALUES (?, ?, ?, ?, ?)`)
+      .run(p.id, p.name, p.origin, p.storageStatePath, now());
+  }
+
+  listAuthProfiles(): AuthProfileRow[] {
+    return this.db.prepare(`SELECT * FROM auth_profiles ORDER BY created_at DESC`).all() as AuthProfileRow[];
+  }
+
+  getAuthProfile(id: string): AuthProfileRow | undefined {
+    return this.db.prepare(`SELECT * FROM auth_profiles WHERE id = ?`).get(id) as AuthProfileRow | undefined;
+  }
+
+  deleteAuthProfile(id: string): void {
+    this.db.prepare(`DELETE FROM auth_profiles WHERE id = ?`).run(id);
+  }
+
+  touchAuthProfile(id: string): void {
+    this.db.prepare(`UPDATE auth_profiles SET last_used_at = ? WHERE id = ?`).run(now(), id);
   }
 }

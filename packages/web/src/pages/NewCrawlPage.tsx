@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router';
-import { DEFAULT_EXCLUDE_PATTERNS, defaultCrawlSettings, type CrawlSettings, type SiteSettingsInfo } from '@site-capture/shared';
+import { Link, useNavigate } from 'react-router';
+import {
+  DEFAULT_EXCLUDE_PATTERNS,
+  defaultCrawlSettings,
+  type AuthProfileItem,
+  type SiteSettingsInfo,
+  type StartCrawlRequest,
+} from '@site-capture/shared';
 import { Badge } from '../components/StatusBadge';
 import { api } from '../lib/api';
 import styles from './NewCrawlPage.module.css';
@@ -30,8 +36,30 @@ export function NewCrawlPage() {
   const [maxWaitMs, setMaxWaitMs] = useState(defaults.capture.maxWaitMs);
   const [expandToggles, setExpandToggles] = useState(false);
   const [preset, setPreset] = useState<SiteSettingsInfo | null>(null);
+  const [profiles, setProfiles] = useState<AuthProfileItem[]>([]);
+  const [authProfileId, setAuthProfileId] = useState('');
+  const [authChosenByUser, setAuthChosenByUser] = useState(false);
+  const [basicUser, setBasicUser] = useState('');
+  const [basicPassword, setBasicPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.listAuthProfiles().then(setProfiles).catch(() => setProfiles([]));
+  }, []);
+
+  // URL のオリジンが一致するログイン状態を自動で選ぶ（利用者が自分で選んだ後は変えない）
+  const origin = (() => {
+    try {
+      return new URL(url.trim()).origin;
+    } catch {
+      return null;
+    }
+  })();
+  useEffect(() => {
+    if (authChosenByUser) return;
+    setAuthProfileId(profiles.find((p) => p.origin === origin)?.id ?? '');
+  }, [origin, profiles, authChosenByUser]);
 
   // 入力されたURLに合うサイト設定（Notion など）を表示する
   useEffect(() => {
@@ -52,8 +80,10 @@ export function NewCrawlPage() {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
-    const settings: Partial<CrawlSettings> = {
+    const settings: StartCrawlRequest = {
       startUrl: url.trim(),
+      authProfileId: authProfileId || null,
+      basicAuth: basicUser ? { username: basicUser, password: basicPassword } : null,
       viewports: widths,
       includeSubdomains,
       keepQueryParams: keepQuery,
@@ -160,6 +190,53 @@ export function NewCrawlPage() {
               追加
             </button>
           </div>
+        </section>
+
+        <section className={styles.section}>
+          <label className={styles.label} htmlFor="auth">
+            ログイン
+          </label>
+          <select
+            id="auth"
+            className="input"
+            value={authProfileId}
+            onChange={(e) => {
+              setAuthProfileId(e.target.value);
+              setAuthChosenByUser(true);
+            }}
+          >
+            <option value="">ログインしない</option>
+            {profiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}（{p.origin}）
+              </option>
+            ))}
+          </select>
+          <p className={styles.hint}>
+            ログインが必要なページを撮るときは、保存したログイン状態を選びます。
+            {profiles.length === 0 ? 'まだありません。' : ''}
+            <Link to={`/settings${url.trim() ? `?url=${encodeURIComponent(url.trim())}` : ''}`}>ログイン状態を作る</Link>
+          </p>
+          <details className={styles.details}>
+            <summary>Basic認証（ID とパスワードの入力画面が出るサイト）</summary>
+            <div className={styles.fieldGrid}>
+              <label className={styles.field}>
+                ID
+                <input className="input" autoComplete="off" value={basicUser} onChange={(e) => setBasicUser(e.target.value)} />
+              </label>
+              <label className={styles.field}>
+                パスワード
+                <input
+                  className="input"
+                  type="password"
+                  autoComplete="new-password"
+                  value={basicPassword}
+                  onChange={(e) => setBasicPassword(e.target.value)}
+                />
+              </label>
+            </div>
+            <p className={styles.hint}>この撮影の間だけ使い、保存しません。起点のURLと同じサイトにだけ送ります。</p>
+          </details>
         </section>
 
         <section className={styles.section}>

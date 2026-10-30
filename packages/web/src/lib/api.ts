@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type {
+  AuthProfileItem,
   CrawlDetail,
   CrawlEvent,
-  CrawlSettings,
   CrawlSummary,
+  LoginSessionInfo,
   PageItem,
   SiteSettingsInfo,
+  StartCrawlRequest,
   StreamMessage,
 } from '@site-capture/shared';
 
@@ -28,11 +30,17 @@ export const api = {
   listCrawls: () => request<CrawlSummary[]>('/api/crawls'),
   getCrawl: (id: number) => request<CrawlDetail>(`/api/crawls/${id}`),
   listPages: (id: number) => request<PageItem[]>(`/api/crawls/${id}/pages`),
-  startCrawl: (settings: Partial<CrawlSettings>) =>
-    request<CrawlDetail>('/api/crawls', { method: 'POST', body: JSON.stringify(settings) }),
+  startCrawl: (req: StartCrawlRequest) => request<CrawlDetail>('/api/crawls', { method: 'POST', body: JSON.stringify(req) }),
   stopCrawl: (id: number) => request<{ ok: true }>(`/api/crawls/${id}/stop`, { method: 'POST' }),
   deleteCrawl: (id: number) => request<{ ok: true }>(`/api/crawls/${id}`, { method: 'DELETE' }),
   matchSiteSettings: (url: string) => request<SiteSettingsInfo>(`/api/site-settings/match?url=${encodeURIComponent(url)}`),
+  listAuthProfiles: () => request<AuthProfileItem[]>('/api/auth-profiles'),
+  deleteAuthProfile: (id: string) => request<{ ok: true }>(`/api/auth-profiles/${id}`, { method: 'DELETE' }),
+  openLoginSession: (name: string, url: string) =>
+    request<LoginSessionInfo>('/api/auth-profiles/sessions', { method: 'POST', body: JSON.stringify({ name, url }) }),
+  getLoginSession: (id: string) => request<LoginSessionInfo>(`/api/auth-profiles/sessions/${id}`),
+  saveLoginSession: (id: string) => request<AuthProfileItem>(`/api/auth-profiles/sessions/${id}/save`, { method: 'POST' }),
+  cancelLoginSession: (id: string) => request<{ ok: true }>(`/api/auth-profiles/sessions/${id}`, { method: 'DELETE' }),
 };
 
 // 撮影セッションの詳細とページ一覧を読み込み、進捗の通知（SSE）を受けて最新に保つ

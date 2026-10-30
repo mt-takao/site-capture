@@ -6,7 +6,8 @@ export class ValidationError extends Error {}
 
 export function parseCrawlSettings(body: unknown): CrawlSettings {
   if (!body || typeof body !== 'object') throw new ValidationError('撮影設定がありません');
-  const input = body as Partial<CrawlSettings>;
+  // Basic 認証の ID・パスワードは撮影設定に入れない（保存しないため）。呼び出し側で別に受け取る
+  const { basicAuth: _basicAuth, ...input } = body as Partial<CrawlSettings> & { basicAuth?: unknown };
   if (typeof input.startUrl !== 'string' || !input.startUrl.trim()) throw new ValidationError('URLを入力してください');
 
   let url: URL;
@@ -40,7 +41,16 @@ export function parseCrawlSettings(body: unknown): CrawlSettings {
   if (s.sampling.mode === 'firstN') requireInt(s.sampling.n, 1, 1000, '間引きの件数');
   if (!Array.isArray(s.excludePatterns)) throw new ValidationError('除外パターンの形式が正しくありません');
   s.excludePatterns = s.excludePatterns.map(String).map((p) => p.trim()).filter(Boolean);
+  if (s.authProfileId != null && typeof s.authProfileId !== 'string') throw new ValidationError('ログイン状態の指定が正しくありません');
   return s;
+}
+
+export function parseBasicAuth(body: unknown): { username: string; password: string } | null {
+  const v = (body as { basicAuth?: unknown } | null)?.basicAuth;
+  if (v == null) return null;
+  const { username, password } = v as { username?: unknown; password?: unknown };
+  if (typeof username !== 'string' || typeof password !== 'string') throw new ValidationError('Basic認証のIDとパスワードの形式が正しくありません');
+  return username ? { username, password } : null;
 }
 
 function requireInt(v: unknown, min: number, max: number, label: string): void {

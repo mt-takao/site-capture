@@ -166,6 +166,8 @@ export class CrawlRunner {
       for (const s of result.shots) this.emit({ type: 'shot-done', pageId: item.pageId, width: s.viewportWidth, thumbPath: s.thumbPath });
       this.emit({ type: 'page-done', pageId: item.pageId, waitTimedOut: result.shots.some((s) => s.waitTimedOut) });
 
+      if (item.depth === 0) this.warnIfLoginRedirect(item.url, result.finalUrl);
+
       // 転送された先が範囲外（外部サイト）なら、そのページのリンクはたどらない
       const finalHost = new URL(result.finalUrl).hostname;
       if (isSameSite(finalHost, new URL(settings.startUrl).hostname, settings.includeSubdomains)) {
@@ -233,6 +235,15 @@ export class CrawlRunner {
     }
     this.admitted++;
     this.queue.push({ pageId, url: url.href, depth });
+  }
+
+  // 設計書 7.1: 起点ページがログイン画面に転送されたら、ログインが切れている可能性を知らせる
+  private warnIfLoginRedirect(url: string, finalUrl: string): void {
+    const looksLikeLogin = (u: string) => /(log-?in|sign-?in|auth)/i.test(new URL(u).pathname);
+    if (finalUrl !== url && looksLikeLogin(finalUrl) && !looksLikeLogin(url)) {
+      const hint = this.settings.authProfileId ? 'ログイン状態が切れている可能性があります。設定画面で作り直してください' : 'ログインが必要なサイトの場合は、ログイン状態を選んで撮影してください';
+      this.emit({ type: 'warning', message: `起点のページがログイン画面（${finalUrl}）に転送されました。${hint}` });
+    }
   }
 
   private skip(pageId: number, reason: SkipReason): void {

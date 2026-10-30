@@ -100,6 +100,7 @@ export type CrawlSummary = {
 export type CrawlDetail = CrawlSummary & {
   settings: CrawlSettings;
   siteSettingsName: string;
+  authProfileName: string | null; // 使ったログイン状態（削除済みなら null）
   outputDir: string;
   errorMessage: string | null;
 };
@@ -136,6 +137,29 @@ export type SiteSettingsInfo = {
   reloadPerViewport: boolean;
   concurrency: number | null;
   intervalMs: number | null;
+};
+
+// ---- ログイン（設計書 7章） ----
+
+// 撮影開始の要求。Basic 認証（L-04）の ID・パスワードは撮影設定とは別に受け取り、保存しない
+export type StartCrawlRequest = Partial<CrawlSettings> & {
+  basicAuth?: { username: string; password: string } | null;
+};
+
+export type AuthProfileItem = {
+  id: string;
+  name: string;
+  origin: string; // 例: https://example.com
+  createdAt: string;
+  lastUsedAt: string | null;
+};
+
+// ログイン用ブラウザ。open: 開いている、closed: 利用者がウィンドウを閉じた
+export type LoginSessionInfo = {
+  id: string;
+  name: string;
+  url: string;
+  status: 'open' | 'closed';
 };
 
 // SSE で送るメッセージ。つないだ直後に snapshot を送り、その後は CrawlEvent を送る

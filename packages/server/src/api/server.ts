@@ -5,25 +5,27 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { SiteSettingsInfo, StreamMessage } from '@site-capture/shared';
 import type { Store } from '../db/store.js';
-import type { JobManager } from '../jobs/job-manager.js';
+import { authProfileItem, deleteAuthProfile, LoginSessionError, type LoginSessionManager } from '../auth/login-sessions.js';
+import { StartCrawlError, type JobManager } from '../jobs/job-manager.js';
 import { dataRoot } from '../paths.js';
 import { BUILTIN_PRESETS, findSiteSettings } from '../presets/index.js';
 import type { SiteSettings } from '../capture/types.js';
 import { crawlDetail, crawlSummary, pageItems } from './dto.js';
-import { parseCrawlSettings, ValidationError } from './validate.js';
+import { parseBasicAuth, parseCrawlSettings, ValidationError } from './validate.js';
 
 // 設計書 8章「API」。画面（packages/web）のビルド結果があれば、それも配信する
 
 export type ServerOptions = {
   store: Store;
   jobs: JobManager;
+  logins: LoginSessionManager;
   port: number;
   webDistDir?: string;
   sseHeartbeatMs?: number;
 };
 
 export async function buildServer(opts: ServerOptions): Promise<FastifyInstance> {
-  const { store, jobs } = opts;
+  const { store, jobs, logins } = opts;
   const app = Fastify({ logger: false });
 
   // 自分のPCのブラウザから 127.0.0.1 / localhost として来た要求だけを受け付ける。
@@ -34,7 +36,9 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   });
 
   app.setErrorHandler((err, _req, reply) => {
-    if (err instanceof ValidationError) return reply.code(400).send({ error: err.message });
+    if (err instanceof ValidationError || err instanceof StartCrawlError || err instanceof LoginSessionError) {
+      return reply.code(400).send({ error: err.message });
+    }
     const status = (err as { statusCode?: number }).statusCode ?? 500;
     const message = err instanceof Error ? err.message : String(err);
     return reply.code(status).send({ error: status === 500 ? 'サーバーでエラーが起きました' : message });
@@ -46,7 +50,8 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
 
   app.post('/api/crawls', async (req, reply) => {
     const settings = parseCrawlSettings(req.body);
-    const { crawlId } = await jobs.start(settings);
+    const basicAuth = parseBasicAuth(req.body);
+    const { crawlId } = await jobs.start(settings, { basicAuth });
     return reply.code(201).send(crawlDetail(store.getCrawl(crawlId)!, store));
   });
 
@@ -118,6 +123,36 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
         .send(createReadStream(path));
     });
   }
+
+  // ---- ログイン（設計書 7章） ----
+
+  app.get('/api/auth-profiles', async () => store.listAuthProfiles().map(authProfileItem));
+
+  app.delete<{ Params: { id: string } }>('/api/auth-profiles/:id', async (req, reply) => {
+    if (!(await deleteAuthProfile(store, req.params.id))) return reply.code(404).send({ error: 'ログイン状態が見つかりません' });
+    return { ok: true };
+  });
+
+  // ログイン用ブラウザを開く（画面ありのブラウザが利用者のPCに表示される）
+  app.post<{ Body: { name?: string; url?: string } }>('/api/auth-profiles/sessions', async (req, reply) => {
+    const session = await logins.open(String(req.body?.name ?? ''), String(req.body?.url ?? ''));
+    return reply.code(201).send(session);
+  });
+
+  app.get<{ Params: { sid: string } }>('/api/auth-profiles/sessions/:sid', async (req, reply) => {
+    const session = logins.get(req.params.sid);
+    if (!session) return reply.code(404).send({ error: 'ログイン用ブラウザが見つかりません' });
+    return session;
+  });
+
+  app.post<{ Params: { sid: string } }>('/api/auth-profiles/sessions/:sid/save', async (req, reply) => {
+    return reply.code(201).send(await logins.save(req.params.sid));
+  });
+
+  app.delete<{ Params: { sid: string } }>('/api/auth-profiles/sessions/:sid', async (req) => {
+    await logins.close(req.params.sid);
+    return { ok: true };
+  });
 
   app.get('/api/site-settings', async () => BUILTIN_PRESETS.map(siteInfo));
 
