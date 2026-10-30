@@ -10,13 +10,25 @@ importers:
 
   packages/server:
     dependencies:
+      better-sqlite3:
+        specifier: ^13.0.3
+        version: 13.0.3
       playwright:
         specifier: ^1.64.1
         version: 1.64.1
+      robots-parser:
+        specifier: ^3.0.1
+        version: 3.0.1
       sharp:
         specifier: ^0.35.5
         version: 0.35.5(@types/node@26.6.5)
+      tldts:
+        specifier: ^7.4.19
+        version: 7.4.19
     devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^9.6.0
+        version: 9.6.0
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -350,6 +362,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@types/better-sqlite3@9.6.0':
+    resolution: {integrity: sha512-ZEEwBSgMu7GYJOynoagg5X9JbxfL6dTJDsgViJIqh67jV44kyOr9RXfmFjLK5rzC4MWssP06t9hu/JwGDnUbCg==}
+
   '@types/node@26.6.5':
     resolution: {integrity: sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==}
 
@@ -473,6 +488,10 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  better-sqlite3@13.0.3:
+    resolution: {integrity: sha512-RbOBxmLBG8uvFUc15X9+9SFemKcQ0WBuISBVkpuiaUB2qblC8UWlHEjdWVoZ8AdhSwmoEgsiXKfopX0CQxaACQ==}
+    engines: {node: '>=22'}
+
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
@@ -487,6 +506,10 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
+  node-addon-api@8.9.2:
+    resolution: {integrity: sha512-VijLXbi3UACN69I0JVXJsX4tjACjNoQDgv2gTF6sx2wWEi8tkSg2eX8p5gSIFi8z2+DL3oHmY6OyKce38SDolg==}
+    engines: {node: ^18 || ^20 || >= 21}
+
   playwright-core@1.64.1:
     resolution: {integrity: sha512-BC4s8y6SEVA6Q1rSxZTto8hI1KUI3xXlHGZgvGqP4IqPdI/a6FX9H29IDNz7vKo9l21b6LfYosScPL6M3xxyDQ==}
     engines: {node: '>=20'}
@@ -496,6 +519,10 @@ packages:
     resolution: {integrity: sha512-HCrVhHr5QQuwYoswEUGTb7gGp522yflbv/ST8nF4sFWGuLjQCt17Q/EubpGGSNKYn1tsTCPZxqHhHCfVURu7UA==}
     engines: {node: '>=20'}
     hasBin: true
+
+  robots-parser@3.0.1:
+    resolution: {integrity: sha512-s+pyvQeIKIZ0dx5iJiQk1tPLJAWln39+MI5jtM8wnyws+G5azk+dMnMX0qfbqNetKKNgcWWOdi0sfm+FbQbgdQ==}
+    engines: {node: '>=10.0.0'}
 
   semver@7.8.5:
     resolution: {integrity: sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==}
@@ -510,6 +537,13 @@ packages:
     peerDependenciesMeta:
       '@types/node':
         optional: true
+
+  tldts-core@7.4.20:
+    resolution: {integrity: sha512-C630TWXZCZmLq0F2bW4QqwnaaxCQ/svpAqvJwnC4JvgEM5ohhBnGsEzTLSOXcN+xjz+kEaHS5uoWIw2klnqd0A==}
+
+  tldts@7.4.19:
+    resolution: {integrity: sha512-48dH6aSpQnpbzDUc4vIQZ1VjB8tkK+e8c1yx05/SZK+rkssgjEOlxDd/yU8/a4vGYQ9vRgJr9dwMq9TJ0b3X2Q==}
+    hasBin: true
 
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
@@ -718,6 +752,10 @@ snapshots:
   '@img/sharp-win32-x64@0.35.5':
     optional: true
 
+  '@types/better-sqlite3@9.6.0':
+    dependencies:
+      '@types/node': 26.6.5
+
   '@types/node@26.6.5':
     dependencies:
       undici-types: 8.9.0
@@ -782,6 +820,10 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
+  better-sqlite3@13.0.3:
+    dependencies:
+      node-addon-api: 8.9.2
+
   detect-libc@2.1.2: {}
 
   esbuild@0.28.2:
@@ -816,11 +858,15 @@ snapshots:
   fsevents@2.3.3:
     optional: true
 
+  node-addon-api@8.9.2: {}
+
   playwright-core@1.64.1: {}
 
   playwright@1.64.1:
     dependencies:
       playwright-core: 1.64.1
+
+  robots-parser@3.0.1: {}
 
   semver@7.8.5: {}
 
@@ -856,6 +902,12 @@ snapshots:
       '@img/sharp-win32-ia32': 0.35.5
       '@img/sharp-win32-x64': 0.35.5
       '@types/node': 26.6.5
+
+  tldts-core@7.4.20: {}
+
+  tldts@7.4.19:
+    dependencies:
+      tldts-core: 7.4.20
 
   tslib@2.8.1:
     optional: true

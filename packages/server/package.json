@@ -4,15 +4,20 @@
   "type": "module",
   "scripts": {
     "capture": "tsx src/cli/capture.ts",
+    "crawl": "tsx src/cli/crawl.ts",
     "test": "node --import tsx --test 'test/**/*.test.ts'",
     "spike": "tsx spike/run.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "better-sqlite3": "^13.0.3",
     "playwright": "^1.64.1",
-    "sharp": "^0.35.5"
+    "robots-parser": "^3.0.1",
+    "sharp": "^0.35.5",
+    "tldts": "^7.4.19"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.5",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"

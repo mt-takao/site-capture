@@ -1,7 +1,5 @@
 // 1つのURLを複数の画面幅で撮って保存する（M1 の完了条件「コマンド1つで撮れる」）。
 // 使い方: pnpm capture <URL> [--widths 1440,375] [--out <保存先>] [--expand-toggles] [--no-preset]
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { chromium } from 'playwright';
 import { BlockedError } from '../capture/blocked.js';
@@ -9,6 +7,7 @@ import { capturePage, createCaptureContext } from '../capture/capture-page.js';
 import { HostGate, withRateLimitRetry } from '../capture/host-gate.js';
 import { DEFAULT_CAPTURE_OPTIONS, DEFAULT_SITE_SETTINGS, viewportForWidth } from '../capture/types.js';
 import { findSiteSettings } from '../presets/index.js';
+import { captureDir } from '../paths.js';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -28,7 +27,7 @@ if (!url) {
 
 const host = new URL(url).hostname;
 const widths = values.widths.split(',').map((w) => Number(w.trim())).filter((w) => w > 0);
-const outDir = values.out ?? join(homedir(), 'SiteCapture', 'captures', host, timestamp(new Date()));
+const outDir = values.out ?? captureDir(host, new Date());
 const site = values['no-preset'] ? DEFAULT_SITE_SETTINGS : findSiteSettings(url);
 const options = { ...DEFAULT_CAPTURE_OPTIONS, expandToggles: values['expand-toggles'] };
 
@@ -71,7 +70,3 @@ try {
   await browser.close();
 }
 
-function timestamp(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
-}

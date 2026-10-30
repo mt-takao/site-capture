@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "capture": "pnpm --filter @site-capture/server capture",
+    "crawl": "pnpm --filter @site-capture/server crawl",
     "test": "pnpm --filter @site-capture/server test",
     "spike": "pnpm --filter @site-capture/server spike"
   }

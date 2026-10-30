@@ -1,10 +1,10 @@
 # Site Capture 設計書
 
-- 版: v1.2
+- 版: v1.3
 - 更新日: 2026-10-30
 - 元にした要件: [requirements.md](requirements.md) v1.1
 - 状態: 確定（未決事項はすべて回答済み。「11. 決定事項の記録」を参照）
-- 変更履歴: v1.1 で M0 技術検証の結果（[m0-findings.md](m0-findings.md)）を反映した。主な変更は 5.5（アクセス制限への対応）、6.2、6.4、6.5。v1.2 で M1 の実装結果を反映した（6.1、6.5、10章）
+- 変更履歴: v1.1 で M0 技術検証の結果（[m0-findings.md](m0-findings.md)）を反映した。主な変更は 5.5（アクセス制限への対応）、6.2、6.4、6.5。v1.2 で M1 の実装結果を反映した（6.1、6.5、10章）。v1.3 で M2 の実装結果を反映した（4章、5章、10章）
 
 ---
 
@@ -122,15 +122,18 @@ site-capture/
 crawls（撮影セッション）
   id, start_url, status, settings_json, auth_profile_id, output_dir,
   created_at, started_at, finished_at,
-  pages_found, pages_done, pages_failed
+  pages_found, pages_done, pages_failed, pages_skipped, error_message
 
 pages（ページ）
   id, crawl_id, url, normalized_url, path, group_key, depth, found_from_page_id,
-  status, http_status, title, error_message, wait_timed_out, created_at
+  status, skip_reason, http_status, title, final_url, error_message, wait_timed_out,
+  created_at, updated_at
+  ※ (crawl_id, normalized_url) で一意
 
 shots（画像）
   id, page_id, viewport_width, file_path, thumb_path,
-  image_width, image_height, is_tiled, tile_count, captured_at
+  image_width, image_height, method, fell_back, captured_at
+  ※ (page_id, viewport_width) で一意
 
 auth_profiles（ログイン状態）
   id, name, origin, storage_state_path, created_at, last_used_at
@@ -140,7 +143,11 @@ site_settings（サイト設定・プリセット）
 ```
 
 - `status`（crawls）: `queued` → `running` → `done` ／ `stopped` ／ `error`
-- `status`（pages）: `queued` → `capturing` → `done` ／ `failed` ／ `skipped`（範囲外やHTML以外）
+- `status`（pages）: `queued` → `capturing` → `done` ／ `failed` ／ `skipped`
+- `skip_reason`（pages）: `robots`（robots.txt で禁止）、`sampling`（間引き）、`max-pages`（最大ページ数を超えた）、`not-html`（HTML以外）
+  - 範囲外のリンク（外部サイト、除外パターン、HTML以外の拡張子、最大階層より深い）は記録しない。外部サイトへのリンクまで記録すると件数が膨れるため
+- `method`（shots）: 撮影方式（`fullpage`、`tiled`、`expand`、`stitch`）。`fell_back` は展開方式からつなぎ合わせ方式に切り替えたかどうか
+- 実装は `packages/server/src/db/`（better-sqlite3）。スキーマの版は `PRAGMA user_version` で管理する
 - `group_key`: 同じ階層のページをまとめるためのキー（5.3）
 - `settings_json`（crawls）: 撮影開始時の設定をまるごと保存する。あとで同じ設定で撮り直せるようにするため
 
@@ -209,6 +216,15 @@ Basic認証（L-04）のIDとパスワードは `settings_json` にもデータ�
 
 リンク集めは、選ばれた画面幅のうちいちばん広い幅（初期値 1440px）で表示したときだけ行う。スマホ幅でしか出てこないページがあるサイトは撮る予定がないため、ほかの幅ではリンクを集めない（11章 #4）。
 
+M2 で決めた細かい点:
+
+- 起点URLの次に、サイトマップのURLをキューに入れる。サイトマップから来たページの階層は 1 とする
+- robots.txt に `Crawl-delay` があり、`respectRobotsTxt` が true なら、アクセス間隔をその秒数以上にする
+- サイト設定（プリセット）の `concurrency`・`intervalMs` は、アクセスを控えめにする方向にだけ効かせる（同時に開くページ数は小さいほう、間隔は大きいほうを使う）
+- 転送された先が範囲外（外部サイト）だった場合、そのページのリンクはたどらない
+- 途中で止めたとき、撮影中のページは撮り終えてから止まる。アクセス制限で待っている間でも、待ちを打ち切ってすぐ止まる。撮っていないページは `queued` のまま残す
+- 実装は `packages/server/src/crawler/`（判定の部品）と `packages/server/src/jobs/crawl-runner.ts`（実行）。コマンド `pnpm crawl <URL>` で動かせる
+
 ### 5.2 URLの正規化（C-03, C-03a）
 
 1. `#` 以降を削除する
@@ -228,7 +244,11 @@ Basic認証（L-04）のIDとパスワードは `settings_json` にもデータ�
 5. `respectRobotsTxt` が true なら、robots.txt で禁止されていない
 6. 階層が `maxDepth` 以下
 
-HTML以外かどうかは、実際に開いたときの `Content-Type` でも確かめる。HTMLでなければ `skipped` にする（C-10）。
+HTML以外かどうかは、実際に開いたときの `Content-Type` でも確かめる。HTMLでなければ `skipped` にする（C-10）。PDF などブラウザがダウンロードとして扱うものも同じ扱いにする。
+
+重複の判定には正規化したURLを使うが、実際に開くのは元のURL（`#` 以降と、`keepQueryParams` が false ならクエリを除いたもの）とする。`/about/` を `/about` に変えて開くと 404 を返すサーバーがあるため。
+
+判定の順番は「範囲 → 最大階層 → 重複 → robots.txt → 最大ページ数 → 間引き」。
 
 間引き（C-03b）:
 
@@ -239,7 +259,8 @@ HTML以外かどうかは、実際に開いたときの `Content-Type` でも確
 
 ### 5.4 リンクの集め方（C-08, J-06）
 
-- 描画が落ち着いた後（6.2）に、`a[href]` をすべて集める。`<area href>` も対象にする
+- 1つ目（いちばん広い）の画面幅を撮り終えた後に、`a[href]` をすべて集める。`<area href>` も対象にする。末尾までスクロールした後に集めるのは、スクロールして初めて描画されるリンク（フッターなど）も拾うため
+- 制約: 描画が落ち着いたと判定した後（6.2、初期値では最後の変化から1秒後）にさらに遅れて追加されるリンクは拾えない
 - ページ移動のJavaScript（`history.pushState`、`history.replaceState`）をページ読み込み時に横取りする小さなスクリプトを入れておき、表示中に発生したURLも集める
 - `onclick` だけで移動するボタン（`href` がない要素）はたどらない（要件の対象外「ボタン操作をしないと出てこないページ」に当たる）
 
@@ -346,7 +367,7 @@ DOM の変化も、同じ要素が5回を超えて変化した場合はその要
 | スクロール領域 | 指定しない（自動検出で本文の領域が見つかった） |
 | 隠す要素（`hideByText`） | 「Get Notion free」「Notionを今すぐ使う」「Try Notion」「Notionを試す」。文字列が一致する要素を含むボタンごと隠す |
 | トグルを開くスクリプト（`expandTogglesScript`） | `expandToggles` が true のとき、`[data-block-id]` の中の `role="button"` かつ `aria-expanded="false"` の要素を押す。ポップアップを開くボタン（`aria-haspopup` 付き）は押さない。入れ子のトグルのため最大5回繰り返す |
-| 同時に開くページ数・間隔 | 1ページ、30秒（5.5） |
+| 同時に開くページ数・間隔 | 1ページ、30秒（5.5）。M2 で、この設定で公開ハンドブックを5ページ続けて巡回し、制限を受けずに撮れることを確かめた（1ページあたり約28秒） |
 | 画面幅ごとに開き直すか | 開き直さない（`reloadPerViewport: false`、5.5） |
 
 - Notion のクラス名は `x87ps6o x1ypdohk ...` のような自動生成の名前で、変わりうる。プリセットではクラス名を使わず、要素の文字列や自動検出に頼る
@@ -465,7 +486,7 @@ type CrawlEvent =
 |---|---|---|
 | M0 技術検証（完了） | Notionの公開ページと一般的なSPAで、表示完了の判定（6.2）、スクロール領域の検出（6.3）、展開方式とつなぎ合わせ方式（6.4）を試す | 完了。結果は [m0-findings.md](m0-findings.md) |
 | M1 撮影エンジン（完了） | 1つのURLを複数の画面幅で撮って保存する（6章）。アクセス制限の検出と撮り直し（5.5）、1回の読み込みで複数の画面幅を撮る方式、`hideByText` も含む | コマンド1つで通常のページとNotionのページが撮れる |
-| M2 クローラー | URLの正規化、範囲判定、間引き、サイトマップ、robots.txt、データベースへの保存（5章） | 数十ページのサイトを全部撮れる |
+| M2 クローラー（完了） | URLの正規化、範囲判定、間引き、サイトマップ、robots.txt、データベースへの保存（5章） | 数十ページのサイトを全部撮れる |
 | M3 Web UI（基本） | 撮影履歴、撮影開始、撮影結果（進捗つき）、ページ詳細 | 画面から撮影を始めて結果を見られる |
 | M4 ログイン | ログイン用ブラウザ、ログイン状態の管理、Basic認証 | ログインが必要なページを撮れる |
 | M5 比較 | 対応表、3つの表示モード | 2回分の撮影結果を見比べられる |

@@ -76,13 +76,15 @@ export async function capturePage(input: CapturePageInput): Promise<CapturePageR
           const stable = await waitForStable(loaded.page, loaded.network, options);
           loaded.waitTimedOut = stable.timedOut;
         }
+        const shot = await shootViewport(loaded, url, vp, input.outDir, site, options, log);
         if (i === 0) {
           result.httpStatus = loaded.status;
           result.finalUrl = loaded.page.url();
           result.title = await loaded.page.title();
+          // 末尾までスクロールして撮り終えた後に集める。スクロールで初めて描画されるリンク（フッターなど）も拾うため
           result.links = await collectLinks(loaded.page);
         }
-        return shootViewport(loaded, url, vp, input.outDir, site, options, log);
+        return shot;
       });
       result.shots.push(shot);
     }
