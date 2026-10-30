@@ -1,22 +1,7 @@
 // 撮影エンジンの設定と結果の型（設計書 4.1）
 
-export type CaptureOptions = {
-  extraWaitMs: number; // S-04
-  quietWindowMs: number; // J-01
-  maxWaitMs: number; // J-01
-  pageTimeoutMs: number; // 1画面幅あたりの上限
-  disableAnimations: boolean; // S-06
-  expandToggles: boolean; // J-09
-};
-
-export const DEFAULT_CAPTURE_OPTIONS: CaptureOptions = {
-  extraWaitMs: 1000,
-  quietWindowMs: 1000,
-  maxWaitMs: 15000,
-  pageTimeoutMs: 30000,
-  disableAnimations: true,
-  expandToggles: false,
-};
+// 撮影の設定は画面と共通なので packages/shared に置いている
+export { DEFAULT_CAPTURE_OPTIONS, type CaptureOptions } from '@site-capture/shared';
 
 export type SiteSettings = {
   name: string;

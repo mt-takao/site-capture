@@ -3,9 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "pnpm --filter @site-capture/web build && pnpm --filter @site-capture/server start",
+    "dev": "pnpm --parallel --filter @site-capture/server --filter @site-capture/web dev",
     "capture": "pnpm --filter @site-capture/server capture",
     "crawl": "pnpm --filter @site-capture/server crawl",
     "test": "pnpm --filter @site-capture/server test",
-    "spike": "pnpm --filter @site-capture/server spike"
+    "spike": "pnpm --filter @site-capture/server spike",
+    "typecheck": "pnpm -r typecheck"
   }
 }

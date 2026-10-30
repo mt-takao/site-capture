@@ -1,0 +1,27 @@
+.group {
+  display: inline-flex;
+  /* 狭い画面ではみ出す場合は、ページ全体ではなくこの中だけを横にスクロールさせる */
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+.item {
+  height: 26px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.item[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font-weight: 600;
+}

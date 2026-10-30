@@ -3,8 +3,9 @@ import type { ShotRecord } from '../capture/types.js';
 import type { CrawlSettings, SkipReason } from '../crawler/types.js';
 import { MIGRATIONS } from './schema.js';
 
-export type CrawlStatus = 'queued' | 'running' | 'done' | 'stopped' | 'error';
-export type PageStatus = 'queued' | 'capturing' | 'done' | 'failed' | 'skipped';
+import type { CrawlStatus, PageStatus } from '@site-capture/shared';
+
+export type { CrawlStatus, PageStatus };
 
 export type CrawlRow = {
   id: number;
@@ -196,5 +197,32 @@ export class Store {
 
   listShots(pageId: number): ShotRow[] {
     return this.db.prepare(`SELECT * FROM shots WHERE page_id = ? ORDER BY viewport_width DESC`).all(pageId) as ShotRow[];
+  }
+
+  // 撮影セッションを消す（pages と shots も消える）。画像ファイルは呼び出し側で消す
+  deleteCrawl(id: number): void {
+    this.db.prepare(`DELETE FROM crawls WHERE id = ?`).run(id);
+  }
+
+  getShot(id: number): ShotRow | undefined {
+    return this.db.prepare(`SELECT * FROM shots WHERE id = ?`).get(id) as ShotRow | undefined;
+  }
+
+  listShotsForCrawl(crawlId: number): ShotRow[] {
+    return this.db
+      .prepare(
+        `SELECT s.* FROM shots s JOIN pages p ON p.id = s.page_id WHERE p.crawl_id = ? ORDER BY s.page_id, s.viewport_width DESC`,
+      )
+      .all(crawlId) as ShotRow[];
+  }
+
+  // 一覧に出す代表サムネイル: 最初に撮れたページの、いちばん広い画面幅の画像
+  representativeShot(crawlId: number): ShotRow | undefined {
+    return this.db
+      .prepare(
+        `SELECT s.* FROM shots s JOIN pages p ON p.id = s.page_id
+         WHERE p.crawl_id = ? AND p.status = 'done' ORDER BY p.id, s.viewport_width DESC LIMIT 1`,
+      )
+      .get(crawlId) as ShotRow | undefined;
   }
 }

@@ -17,7 +17,7 @@ function page(title: string, links: string[], extra = ''): string {
 <body><h1>${title}</h1><nav>${links.map((h) => `<a href="${h}">${h}</a>`).join(' ')}</nav><main></main>${extra}</body></html>`;
 }
 
-export async function startSiteServer(): Promise<{ origin: string; requests: string[]; close: () => Promise<void> }> {
+export async function startSiteServer(port = 0): Promise<{ origin: string; requests: string[]; close: () => Promise<void> }> {
   const requests: string[] = [];
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -91,8 +91,8 @@ export async function startSiteServer(): Promise<{ origin: string; requests: str
     }
     return html(404, page('見つかりません', []));
   });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
   const addr = server.address();
-  const port = typeof addr === 'object' && addr ? addr.port : 0;
-  return { origin: `http://127.0.0.1:${port}`, requests, close: () => new Promise((r) => server.close(() => r())) };
+  const actualPort = typeof addr === 'object' && addr ? addr.port : 0;
+  return { origin: `http://127.0.0.1:${actualPort}`, requests, close: () => new Promise((r) => server.close(() => r())) };
 }
