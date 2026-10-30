@@ -1,0 +1,10 @@
+{
+  "name": "Notion（公開ページ）",
+  "hostPatterns": ["*.notion.site"],
+  "hideSelectors": [],
+  "hideByText": ["Get Notion free", "Notionを今すぐ使う", "Try Notion", "Notionを試す"],
+  "expandTogglesScript": "const selector = '[data-block-id] [role=\"button\"][aria-expanded=\"false\"]:not([aria-haspopup])';\nfor (let round = 0; round < 5; round++) {\n  const buttons = Array.from(document.querySelectorAll(selector));\n  if (buttons.length === 0) break;\n  for (const button of buttons) button.click();\n  await new Promise((resolve) => setTimeout(resolve, 500));\n}",
+  "reloadPerViewport": false,
+  "concurrency": 1,
+  "intervalMs": 30000
+}

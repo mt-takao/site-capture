@@ -1,2 +1,6 @@
 packages:
   - packages/*
+
+# tsx が使う esbuild のインストール時スクリプト（実行ファイルの確認）を許可する
+allowBuilds:
+  esbuild: true

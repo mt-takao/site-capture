@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "capture": "tsx src/cli/capture.ts",
+    "test": "node --import tsx --test 'test/**/*.test.ts'",
     "spike": "tsx spike/run.ts",
     "typecheck": "tsc --noEmit"
   },

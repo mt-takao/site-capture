@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Notion風のトグルとボタン</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; font: 16px system-ui; }
+  .topbar { height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid #ddd; }
+  .scroller { position: absolute; top: 45px; bottom: 0; left: 0; right: 0; overflow-y: auto; }
+  .page { max-width: 720px; margin: 0 auto; padding: 24px; }
+  .toggle-body { display: none; padding-left: 24px; }
+  [aria-expanded="true"] + .toggle-body { display: block; }
+  .tall { height: 1600px; background: linear-gradient(#fff, #eef); }
+</style></head>
+<body>
+<div class="topbar">
+  <span>トップバー</span>
+  <div role="button" tabindex="0" aria-expanded="false" aria-haspopup="dialog" id="popup">共有</div>
+  <div role="button" tabindex="0"><div><span>Get Notion free</span></div></div>
+</div>
+<div class="scroller"><div class="page">
+  <h1>Notion風のページ</h1>
+  <p><a href="/about">会社概要</a> <a href="/blog/hello?utm_source=x">ブログ</a> <a href="mailto:a@example.com">メール</a></p>
+  <div data-block-id="b1">
+    <div role="button" tabindex="0" aria-expanded="false" aria-label="Open" class="t">▶ トグル1</div>
+    <div class="toggle-body">トグル1の中身
+      <div data-block-id="b2">
+        <div role="button" tabindex="0" aria-expanded="false" aria-label="Open" class="t">▶ 入れ子のトグル</div>
+        <div class="toggle-body">入れ子の中身</div>
+      </div>
+    </div>
+  </div>
+  <div class="tall"></div>
+  <p>末尾</p>
+</div></div>
+<script>
+  // トグルはクリックで開く。入れ子のトグルは親が開いてから操作できる
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest('.t');
+    if (t) t.setAttribute('aria-expanded', String(t.getAttribute('aria-expanded') !== 'true'));
+    if (e.target.closest('#popup')) document.body.dataset.popupOpened = 'true';
+  });
+  // SPA のページ移動（History API）
+  history.replaceState(null, '', location.pathname + '#top');
+  history.pushState(null, '', '/spa/route');
+  history.replaceState(null, '', '/notion-like.html');
+</script>
+</body></html>

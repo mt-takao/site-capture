@@ -64,6 +64,7 @@ export async function shootExpanded(
       if (pos === 'absolute' || pos === 'fixed') node.setAttribute('data-sc-expand-abs', '');
     }
     const style = document.createElement('style');
+    style.setAttribute('data-sc-expand-style', '');
     style.textContent = `
       [data-sc-expand] { height: auto !important; max-height: none !important; min-height: 0 !important; overflow: visible !important; }
       [data-sc-expand-abs] { bottom: auto !important; }
@@ -146,7 +147,9 @@ export async function shootStitched(
         const root = document.querySelector(selector)!;
         for (const el of Array.from(root.querySelectorAll<HTMLElement>('*'))) {
           const pos = getComputedStyle(el).position;
-          if (pos === 'sticky' || pos === 'fixed') el.style.setProperty('visibility', 'hidden', 'important');
+          if (pos !== 'sticky' && pos !== 'fixed') continue;
+          el.setAttribute('data-sc-stitch-hidden', el.style.getPropertyValue('visibility'));
+          el.style.setProperty('visibility', 'hidden', 'important');
         }
       }, target.selector);
       hidSticky = true;
@@ -166,4 +169,23 @@ export async function shootStitched(
     .png()
     .toFile(outPath);
   return { method: 'stitch', width: viewport.width, height: Math.max(height, totalHeight), tiles: layers.length - 1 };
+}
+
+// 展開方式・つなぎ合わせ方式・スクロール領域の検出でページに加えた書き換えを元に戻す。
+// 1回の読み込みで画面幅を切り替えながら撮るときに、次の幅を撮る前に呼ぶ（設計書 6.1）
+export async function undoShootModifications(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    document.querySelectorAll('style[data-sc-expand-style]').forEach((el) => el.remove());
+    for (const attr of ['data-sc-expand', 'data-sc-expand-abs', 'data-sc-scroll-root']) {
+      document.querySelectorAll(`[${attr}]`).forEach((el) => el.removeAttribute(attr));
+    }
+    document.querySelectorAll<HTMLElement>('[data-sc-stitch-hidden]').forEach((el) => {
+      const before = el.getAttribute('data-sc-stitch-hidden');
+      if (before) el.style.setProperty('visibility', before);
+      else el.style.removeProperty('visibility');
+      el.removeAttribute('data-sc-stitch-hidden');
+    });
+    const doc = document.scrollingElement ?? document.documentElement;
+    doc.scrollTop = 0;
+  });
 }

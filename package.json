@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "capture": "pnpm --filter @site-capture/server capture",
+    "test": "pnpm --filter @site-capture/server test",
     "spike": "pnpm --filter @site-capture/server spike"
   }
 }

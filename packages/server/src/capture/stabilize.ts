@@ -51,6 +51,8 @@ export class NetworkTracker {
   private inflight = new Map<Request, number>();
   private urlCounts = new Map<string, number>();
   private lastActivityAt = Date.now();
+  // 読み込み中に 429 を返した通信（設計書 5.5 の「見えにくい制限」の検出に使う）
+  private rateLimited: Array<{ url: string; retryAfterSec: number | null }> = [];
 
   constructor(page: Page) {
     page.on('request', (req) => {
@@ -65,6 +67,14 @@ export class NetworkTracker {
     };
     page.on('requestfinished', done);
     page.on('requestfailed', done);
+    page.on('response', (res) => {
+      if (res.status() !== 429) return;
+      this.rateLimited.push({ url: res.url(), retryAfterSec: parseRetryAfter(res.headers()['retry-after']) });
+    });
+  }
+
+  rateLimitedResponses(): ReadonlyArray<{ url: string; retryAfterSec: number | null }> {
+    return this.rateLimited;
   }
 
   private isIgnored(req: Request): boolean {
@@ -83,6 +93,14 @@ export class NetworkTracker {
     }
     return now - this.lastActivityAt >= quietMs;
   }
+}
+
+function parseRetryAfter(value: string | undefined): number | null {
+  if (!value) return null;
+  const sec = Number(value);
+  if (Number.isFinite(sec)) return Math.max(0, sec);
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? null : Math.max(0, Math.ceil((date - Date.now()) / 1000));
 }
 
 function requestKey(req: Request): string {

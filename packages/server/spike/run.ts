@@ -35,7 +35,7 @@ function startFixtureServer(): Promise<{ origin: string; close: () => void }> {
       return;
     }
     try {
-      const body = await readFile(join(here, 'fixtures', path.replace(/^\//, '')));
+      const body = await readFile(join(here, '..', 'test', 'fixtures', path.replace(/^\//, '')));
       res.setHeader('content-type', 'text/html; charset=utf-8');
       res.end(body);
     } catch {
@@ -82,8 +82,8 @@ async function captureOnce(browser: Browser, target: Target, vp: { width: number
     await injectCaptureStyles(page, { hideSelectors: target.hideSelectors ?? [], disableAnimations: true });
     if (target.waitForSelector) await page.waitForSelector(target.waitForSelector, { timeout: 15000 });
     record.stabilize = await waitForStable(page, network, { quietWindowMs: 1000, maxWaitMs: 15000 });
-    const blocked = await detectBlocked(page, record.status);
-    if (blocked) throw new Error(`blocked: ${blocked}`);
+    const blocked = await detectBlocked(page, record.status ?? null, network);
+    if (blocked) throw blocked;
 
     const scrollTarget = await findScrollTarget(page, target.scrollContainerSelector);
     record.scrollTarget = scrollTarget;
