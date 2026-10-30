@@ -1,0 +1,106 @@
+/* 設計書 9.4「比較ビューアの仕様」 */
+.checker {
+  background: repeating-conic-gradient(var(--surface-muted) 0% 25%, var(--surface) 0% 50%) 0 0 / 16px 16px;
+}
+.scroll {
+  height: calc(100vh - 230px);
+  min-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.labels {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tagA,
+.tagB {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  font-weight: 700;
+  color: #fff;
+}
+.tagA {
+  background: #7c3aed;
+}
+.tagB {
+  background: #0891b2;
+}
+
+/* 左右に並べる */
+.side {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+.side .scroll img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* 重ねる・スライダー: 2枚を同じマスに重ねる。高さは高いほうの画像に合う */
+.stage {
+  position: relative;
+  display: grid;
+  margin: 0 auto;
+  touch-action: none;
+}
+.stage > img {
+  grid-area: 1 / 1;
+  align-self: start;
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.swipe {
+  cursor: ew-resize;
+}
+.divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.handle {
+  position: sticky;
+  top: 45%;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-left: -13px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  box-shadow: var(--shadow);
+}
+.single {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.single img {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  height: auto;
+}

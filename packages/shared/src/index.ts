@@ -139,6 +139,25 @@ export type SiteSettingsInfo = {
   intervalMs: number | null;
 };
 
+// ---- 比較（V-05, V-05b、設計書 9.4） ----
+
+// both: 両方にある、added: B（新しいほう）にだけある、removed: A（古いほう）にだけある
+export type ComparePairStatus = 'both' | 'added' | 'removed';
+
+export type ComparePair = {
+  key: string; // 組み合わせに使ったパス（クエリ付き）
+  status: ComparePairStatus;
+  a: PageItem | null;
+  b: PageItem | null;
+};
+
+export type CompareResult = {
+  a: CrawlSummary;
+  b: CrawlSummary;
+  commonWidths: number[]; // 両方で撮った画面幅（広い順）
+  pairs: ComparePair[];
+};
+
 // ---- ログイン（設計書 7章） ----
 
 // 撮影開始の要求。Basic 認証（L-04）の ID・パスワードは撮影設定とは別に受け取り、保存しない

@@ -10,6 +10,8 @@ import { createServer } from 'node:http';
 //   /broken            404 を返す HTML
 //   /members           Cookie（session=ok）がないと /login に転送される会員ページ
 //   /basic             Basic 認証（user / pass）が必要なページ
+// variant 'b' は「リニューアル後」の版。比較画面の確認に使う。
+//   トップの見出しと帯が変わり、/contact へのリンクがなくなり、/news が増える
 
 export const BLOG_POSTS = 8;
 
@@ -19,7 +21,7 @@ function page(title: string, links: string[], extra = ''): string {
 <body><h1>${title}</h1><nav>${links.map((h) => `<a href="${h}">${h}</a>`).join(' ')}</nav><main></main>${extra}</body></html>`;
 }
 
-export async function startSiteServer(port = 0): Promise<{ origin: string; requests: string[]; close: () => Promise<void> }> {
+export async function startSiteServer(port = 0, variant: 'a' | 'b' = 'a'): Promise<{ origin: string; requests: string[]; close: () => Promise<void> }> {
   const requests: string[] = [];
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -80,10 +82,18 @@ export async function startSiteServer(port = 0): Promise<{ origin: string; reque
 
     switch (p) {
       case '/':
+        if (variant === 'b') {
+          return html(200, page('トップ（リニューアル）', [
+            '/about', '/company/', '/company/history', '/blog', '/news', '/spa', '/redirect', '/broken',
+          ], '<div style="height:320px;margin-top:24px;background:linear-gradient(90deg,#2563eb,#7c3aed);color:#fff;font-size:40px;padding:40px">新しいサービスを始めました</div>'));
+        }
         return html(200, page('トップ', [
           '/about', '/company/', '/company/history', '/blog', '/blog?page=2', '/contact#form', '/spa', '/redirect', '/broken',
           '/logout', '/files/doc.pdf', 'https://external.example.com/', 'mailto:info@example.com', '/about?utm_source=news',
         ]));
+      case '/news':
+        if (variant === 'b') return html(200, page('お知らせ', ['/']));
+        break;
       case '/about':
       case '/about/':
         return html(200, page('会社概要', ['/', '/private/secret']));

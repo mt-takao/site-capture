@@ -1,4 +1,4 @@
-import type { CrawlDetail, CrawlSettings, CrawlSummary, PageItem, ShotItem } from '@site-capture/shared';
+import type { ComparePair, CompareResult, CrawlDetail, CrawlSettings, CrawlSummary, PageItem, ShotItem } from '@site-capture/shared';
 import type { CrawlRow, PageRow, ShotRow, Store } from '../db/store.js';
 import { BUILTIN_PRESETS, findSiteSettings } from '../presets/index.js';
 
@@ -71,4 +71,26 @@ export function pageItems(crawlId: number, store: Store): PageItem[] {
     waitTimedOut: p.wait_timed_out === 1,
     shots: shotsByPage.get(p.id) ?? [],
   }));
+}
+
+// V-05b: 2つの撮影結果のページをパスで組み合わせる。撮影できたページだけを対象にする
+export function compareCrawls(a: CrawlRow, b: CrawlRow, store: Store): CompareResult {
+  const pagesA = pageItems(a.id, store).filter((p) => p.status === 'done');
+  const pagesB = pageItems(b.id, store).filter((p) => p.status === 'done');
+  const byPathA = new Map(pagesA.map((p) => [p.path, p]));
+  const byPathB = new Map(pagesB.map((p) => [p.path, p]));
+  const keys = [...new Set([...byPathA.keys(), ...byPathB.keys()])].sort((x, y) => x.localeCompare(y, 'ja'));
+  const pairs: ComparePair[] = keys.map((key) => {
+    const pa = byPathA.get(key) ?? null;
+    const pb = byPathB.get(key) ?? null;
+    return { key, status: pa && pb ? 'both' : pb ? 'added' : 'removed', a: pa, b: pb };
+  });
+  const widthsA = JSON.parse(a.settings_json).viewports as number[];
+  const widthsB = new Set(JSON.parse(b.settings_json).viewports as number[]);
+  return {
+    a: crawlSummary(a, store),
+    b: crawlSummary(b, store),
+    commonWidths: widthsA.filter((w) => widthsB.has(w)).sort((x, y) => y - x),
+    pairs,
+  };
 }

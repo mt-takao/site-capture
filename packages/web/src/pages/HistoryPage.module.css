@@ -14,6 +14,7 @@
   gap: var(--space-4);
 }
 .card {
+  position: relative;
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border);
@@ -88,4 +89,44 @@
   border-radius: var(--radius);
   text-align: center;
   color: var(--text-muted);
+}
+.cardSelected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.check {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+.check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  pointer-events: none;
+}
+.compareBar {
+  position: sticky;
+  bottom: var(--space-4);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  width: fit-content;
+  max-width: 100%;
+  margin: var(--space-5) auto 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 12%);
 }

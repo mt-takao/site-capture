@@ -10,7 +10,7 @@ import { StartCrawlError, type JobManager } from '../jobs/job-manager.js';
 import { dataRoot } from '../paths.js';
 import { BUILTIN_PRESETS, findSiteSettings } from '../presets/index.js';
 import type { SiteSettings } from '../capture/types.js';
-import { crawlDetail, crawlSummary, pageItems } from './dto.js';
+import { compareCrawls, crawlDetail, crawlSummary, pageItems } from './dto.js';
 import { parseBasicAuth, parseCrawlSettings, ValidationError } from './validate.js';
 
 // 設計書 8章「API」。画面（packages/web）のビルド結果があれば、それも配信する
@@ -123,6 +123,15 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
         .send(createReadStream(path));
     });
   }
+
+  // V-05b: 2つの撮影結果のページの対応表
+  app.get<{ Querystring: { a?: string; b?: string } }>('/api/compare', async (req, reply) => {
+    const a = store.getCrawl(Number(req.query.a));
+    const b = store.getCrawl(Number(req.query.b));
+    if (!a || !b) return reply.code(404).send({ error: '比べる撮影セッションが見つかりません' });
+    if (a.id === b.id) return reply.code(400).send({ error: '別々の撮影を2つ選んでください' });
+    return compareCrawls(a, b, store);
+  });
 
   // ---- ログイン（設計書 7章） ----
 

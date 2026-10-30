@@ -4,6 +4,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Route, Routes } from 'react-router';
 import { Layout } from './components/Layout';
+import { ComparePage } from './pages/ComparePage';
 import { CrawlPage } from './pages/CrawlPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { NewCrawlPage } from './pages/NewCrawlPage';
@@ -19,6 +20,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="new" element={<NewCrawlPage />} />
           <Route path="crawls/:id" element={<CrawlPage />} />
           <Route path="crawls/:id/pages/:pageId" element={<PageDetailPage />} />
+          <Route path="compare" element={<ComparePage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<p className="muted">ページが見つかりません。</p>} />
         </Route>

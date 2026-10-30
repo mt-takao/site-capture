@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type {
   AuthProfileItem,
+  CompareResult,
   CrawlDetail,
   CrawlEvent,
   CrawlSummary,
@@ -34,6 +35,7 @@ export const api = {
   stopCrawl: (id: number) => request<{ ok: true }>(`/api/crawls/${id}/stop`, { method: 'POST' }),
   deleteCrawl: (id: number) => request<{ ok: true }>(`/api/crawls/${id}`, { method: 'DELETE' }),
   matchSiteSettings: (url: string) => request<SiteSettingsInfo>(`/api/site-settings/match?url=${encodeURIComponent(url)}`),
+  compare: (a: number, b: number) => request<CompareResult>(`/api/compare?a=${a}&b=${b}`),
   listAuthProfiles: () => request<AuthProfileItem[]>('/api/auth-profiles'),
   deleteAuthProfile: (id: string) => request<{ ok: true }>(`/api/auth-profiles/${id}`, { method: 'DELETE' }),
   openLoginSession: (name: string, url: string) =>

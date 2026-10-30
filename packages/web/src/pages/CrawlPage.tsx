@@ -96,9 +96,14 @@ export function CrawlPage() {
               停止
             </button>
           ) : (
-            <button type="button" className="btn btn-danger" onClick={remove} disabled={busy}>
-              削除
-            </button>
+            <>
+              <Link to={`/compare?b=${id}`} className="btn">
+                ほかの撮影と比較
+              </Link>
+              <button type="button" className="btn btn-danger" onClick={remove} disabled={busy}>
+                削除
+              </button>
+            </>
           )}
         </div>
       </div>

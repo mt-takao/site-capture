@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { chromium } from 'playwright';
-import type { AuthProfileItem, CrawlDetail, CrawlEvent, CrawlSummary, LoginSessionInfo, PageItem, StreamMessage } from '@site-capture/shared';
+import type { AuthProfileItem, CompareResult, CrawlDetail, CrawlEvent, CrawlSummary, LoginSessionInfo, PageItem, StreamMessage } from '@site-capture/shared';
 import { LoginSessionManager } from '../src/auth/login-sessions.js';
 import { buildServer } from '../src/api/server.js';
 import { Store } from '../src/db/store.js';
@@ -279,4 +279,39 @@ test('Basic 認証の ID とパスワードは撮影に使うが、保存しな�
 
   const without = await crawlAndWait(fastSettings({ startUrl: `${site.origin}/basic`, maxPages: 1 }));
   assert.equal(without.pages[0]!.httpStatus, 401);
+});
+
+// ---- 比較（M5） ----
+
+test('2つの撮影結果をパスで組み合わせ、両方にある・追加・削除に分ける', async () => {
+  // A はトップだけ、B はトップから1階層まで撮る。B は画面幅を2つにする
+  const a = await crawlAndWait(fastSettings({ maxDepth: 0 }));
+  const b = await crawlAndWait(fastSettings({ maxDepth: 1, viewports: [800, 400] }));
+
+  const r = await api<CompareResult>(`/api/compare?a=${a.detail.id}&b=${b.detail.id}`);
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.commonWidths, [800]);
+  const both = r.body.pairs.filter((p) => p.status === 'both').map((p) => p.key);
+  const added = r.body.pairs.filter((p) => p.status === 'added').map((p) => p.key);
+  assert.deepEqual(both, ['/']);
+  assert.ok(added.includes('/about') && added.includes('/blog'));
+  assert.ok(r.body.pairs.every((p) => p.status !== 'removed'));
+  const top = r.body.pairs.find((p) => p.key === '/')!;
+  assert.equal(top.a!.shots.length, 1);
+  assert.equal(top.b!.shots.length, 2);
+
+  // A と B を入れ替えると、追加が削除になる
+  const swapped = await api<CompareResult>(`/api/compare?a=${b.detail.id}&b=${a.detail.id}`);
+  assert.deepEqual(
+    swapped.body.pairs.filter((p) => p.status === 'removed').map((p) => p.key),
+    added,
+  );
+});
+
+test('比較の指定が正しくなければ 404 か 400 を返す', async () => {
+  assert.equal((await api('/api/compare?a=999999&b=1')).status, 404);
+  const one = (await api<CrawlSummary[]>('/api/crawls')).body[0]!;
+  const same = await api<{ error: string }>(`/api/compare?a=${one.id}&b=${one.id}`);
+  assert.equal(same.status, 400);
+  assert.match(same.body.error, /別々の撮影/);
 });
