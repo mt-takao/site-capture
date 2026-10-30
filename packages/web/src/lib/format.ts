@@ -55,3 +55,24 @@ export function pageName(p: PageItem): string {
 export function shotFor(p: PageItem, width: number): ShotItem | undefined {
   return p.shots.find((s) => s.viewportWidth === width) ?? p.shots[0];
 }
+
+// 失敗の理由ごとに、次にどうすればよいかを示す
+export function failureHint(message: string | null): string | null {
+  if (!message) return null;
+  if (message.startsWith('タイムアウト')) {
+    return '表示に時間がかかっています。「詳細設定」の「表示を待つ最大時間」を延ばすか、サイト設定で同時に開くページ数を減らしてください';
+  }
+  if (message.includes('bot-challenge')) {
+    return 'ロボット確認の画面が出ました。時間を空けるか、ログイン用ブラウザで確認を済ませたログイン状態を使ってください';
+  }
+  if (message.startsWith('アクセス制限')) return 'サイト側で制限されました。時間を空けて、アクセス間隔を広げてから撮り直してください';
+  if (message.includes('ERR_NAME_NOT_RESOLVED')) return 'ドメインが見つかりません。URL が正しいか確かめてください';
+  if (message.includes('ERR_CONNECTION_REFUSED') || message.includes('ERR_CONNECTION_RESET')) {
+    return 'サーバーに接続できません。サイトが動いているか確かめてください';
+  }
+  if (message.includes('ERR_CERT')) return 'サイトの証明書に問題があります';
+  if (message.includes('SyntaxError') || message.includes('is not a valid selector')) {
+    return 'サイト設定の CSS セレクタかスクリプトの書き方に誤りがあります';
+  }
+  return null;
+}

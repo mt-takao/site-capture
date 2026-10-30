@@ -3,27 +3,8 @@
 // 撮影の設定は画面と共通なので packages/shared に置いている
 export { DEFAULT_CAPTURE_OPTIONS, type CaptureOptions } from '@site-capture/shared';
 
-export type SiteSettings = {
-  name: string;
-  hostPatterns: string[]; // 例: ['*.notion.site']
-  waitForSelector?: string; // J-02
-  hideSelectors: string[]; // S-05
-  hideByText: string[]; // S-05 文字列で探して隠す
-  scrollContainerSelector?: string; // J-03（手動指定）
-  beforeCaptureScript?: string; // J-07
-  expandTogglesScript?: string; // J-09（expandToggles が true のときだけ実行）
-  reloadPerViewport: boolean; // 画面幅ごとに開き直すか（設計書 6.1）
-  concurrency?: number; // C-11 の上書き
-  intervalMs?: number; // C-11 の上書き
-};
-
-export const DEFAULT_SITE_SETTINGS: SiteSettings = {
-  name: '標準',
-  hostPatterns: [],
-  hideSelectors: [],
-  hideByText: [],
-  reloadPerViewport: true,
-};
+// サイト設定は画面でも編集するので packages/shared に置いている
+export { DEFAULT_SITE_SETTINGS, type SiteSettings } from '@site-capture/shared';
 
 export type Viewport = { width: number; height: number };
 

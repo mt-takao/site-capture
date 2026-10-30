@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import {
   DEFAULT_EXCLUDE_PATTERNS,
   defaultCrawlSettings,
   type AuthProfileItem,
-  type SiteSettingsInfo,
+  type SiteSettingsItem,
   type StartCrawlRequest,
 } from '@site-capture/shared';
 import { Badge } from '../components/StatusBadge';
@@ -17,6 +17,8 @@ const WIDTH_PRESETS = [1920, 1440, 1280, 768, 375];
 
 export function NewCrawlPage() {
   const navigate = useNavigate();
+  const [search] = useSearchParams();
+  const fromId = Number(search.get('from')) || null;
   const defaults = defaultCrawlSettings('');
   const [url, setUrl] = useState('');
   const [widths, setWidths] = useState<number[]>(defaults.viewports);
@@ -35,7 +37,10 @@ export function NewCrawlPage() {
   const [extraWaitMs, setExtraWaitMs] = useState(defaults.capture.extraWaitMs);
   const [maxWaitMs, setMaxWaitMs] = useState(defaults.capture.maxWaitMs);
   const [expandToggles, setExpandToggles] = useState(false);
-  const [preset, setPreset] = useState<SiteSettingsInfo | null>(null);
+  const [preset, setPreset] = useState<SiteSettingsItem | null>(null);
+  const [siteList, setSiteList] = useState<SiteSettingsItem[]>([]);
+  const [siteSettingsId, setSiteSettingsId] = useState(''); // 空なら URL から自動で選ぶ
+  const [fromNote, setFromNote] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<AuthProfileItem[]>([]);
   const [authProfileId, setAuthProfileId] = useState('');
   const [authChosenByUser, setAuthChosenByUser] = useState(false);
@@ -46,7 +51,42 @@ export function NewCrawlPage() {
 
   useEffect(() => {
     api.listAuthProfiles().then(setProfiles).catch(() => setProfiles([]));
+    api.listSiteSettings().then(setSiteList).catch(() => setSiteList([]));
   }, []);
+
+  // 「同じ設定で新しく撮る」から来たときは、その撮影の設定を各欄に入れる
+  useEffect(() => {
+    if (!fromId) return;
+    api
+      .getCrawl(fromId)
+      .then((c) => {
+        const s = c.settings;
+        setUrl(s.startUrl);
+        setWidths(s.viewports);
+        setIncludeSubdomains(s.includeSubdomains);
+        setKeepQuery(s.keepQueryParams);
+        setSampleMode(s.sampling.mode);
+        if (s.sampling.mode === 'firstN') setSampleN(s.sampling.n);
+        setMaxPages(s.maxPages);
+        setMaxDepth(s.maxDepth == null ? '' : String(s.maxDepth));
+        setExcludes(s.excludePatterns.join('\n'));
+        setUseSitemap(s.useSitemap);
+        setRespectRobots(s.respectRobotsTxt);
+        setConcurrency(s.concurrency);
+        setIntervalMs(s.intervalMs);
+        setExtraWaitMs(s.capture.extraWaitMs);
+        setMaxWaitMs(s.capture.maxWaitMs);
+        setExpandToggles(s.capture.expandToggles);
+        setSiteSettingsId(s.siteSettingsId ?? '');
+        setAuthProfileId(s.authProfileId ?? '');
+        setAuthChosenByUser(true);
+        setFromNote(
+          `撮影 #${c.id}（${c.host}）の設定を引き継ぎました。` +
+            (s.usesBasicAuth ? 'Basic 認証の ID とパスワードは保存していないので、「ログイン」欄で入力し直してください。' : ''),
+        );
+      })
+      .catch((e: Error) => setError(e.message));
+  }, [fromId]);
 
   // URL のオリジンが一致するログイン状態を自動で選ぶ（利用者が自分で選んだ後は変えない）
   const origin = (() => {
@@ -96,6 +136,7 @@ export function NewCrawlPage() {
       concurrency,
       intervalMs,
       capture: { ...defaults.capture, extraWaitMs, maxWaitMs, expandToggles },
+      siteSettingsId: siteSettingsId || null,
     };
     try {
       const crawl = await api.startCrawl(settings);
@@ -106,11 +147,14 @@ export function NewCrawlPage() {
     }
   };
 
-  const isNotion = preset?.name.startsWith('Notion');
+  // 実際に使うサイト設定（手で選んだもの、なければ URL から自動で選ばれるもの）
+  const effectiveSite = (siteSettingsId && siteList.find((s) => s.id === siteSettingsId)) || preset;
+  const isNotion = !!effectiveSite?.expandTogglesScript;
 
   return (
     <div className={styles.page}>
       <h1 className={styles.title}>新しく撮影</h1>
+      {fromNote && <p className={styles.fromNote}>{fromNote}</p>}
       <form className={styles.form} onSubmit={submit}>
         <section className={styles.section}>
           <label className={styles.label} htmlFor="url">
@@ -127,16 +171,24 @@ export function NewCrawlPage() {
             onChange={(e) => setUrl(e.target.value)}
           />
           <p className={styles.hint}>このURLから、同じサイト内でたどれるページをすべて撮ります。</p>
-          {preset && (
-            <div className={styles.preset}>
-              <span>サイト設定:</span>
-              <Badge tone={preset.name === '標準' ? 'neutral' : 'accent'}>{preset.name}</Badge>
-              {preset.intervalMs != null && (
-                <span>
-                  アクセス制限を避けるため、{preset.intervalMs / 1000}秒間隔・同時に{preset.concurrency ?? 1}ページで撮ります
-                </span>
-              )}
-            </div>
+          <div className={styles.preset}>
+            <label htmlFor="site">サイト設定:</label>
+            <select id="site" className={`input ${styles.siteSelect}`} value={siteSettingsId} onChange={(e) => setSiteSettingsId(e.target.value)}>
+              <option value="">自動（{preset ? preset.name : 'URL に合うもの'}）</option>
+              {siteList.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                  {s.hostPatterns.length > 0 ? `（${s.hostPatterns.join(', ')}）` : ''}
+                </option>
+              ))}
+            </select>
+            {effectiveSite && effectiveSite.name !== '標準' && <Badge tone="accent">{effectiveSite.name}</Badge>}
+            <Link to="/settings#site-settings">サイト設定を編集</Link>
+          </div>
+          {effectiveSite?.intervalMs != null && (
+            <p className={styles.hint}>
+              このサイト設定では、{effectiveSite.intervalMs / 1000}秒以上の間隔・同時に{effectiveSite.concurrency ?? concurrency}ページ以下で撮ります
+            </p>
           )}
         </section>
 

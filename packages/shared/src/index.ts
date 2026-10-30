@@ -37,7 +37,8 @@ export type CrawlSettings = {
   respectRobotsTxt: boolean;
   authProfileId: string | null; // L-01（M4）
   capture: CaptureOptions;
-  siteSettingsName: string | null; // null なら起点URLから自動で選ぶ
+  siteSettingsId: string | null; // 使うサイト設定。null なら起点URLから自動で選ぶ
+  usesBasicAuth?: boolean; // Basic 認証を使ったか（ID とパスワードは保存しない。撮り直すときに入力し直してもらうため）
 };
 
 // C-09: 押すと状態が変わるリンクを初期値で除外する
@@ -59,9 +60,36 @@ export function defaultCrawlSettings(startUrl: string): CrawlSettings {
     respectRobotsTxt: true,
     authProfileId: null,
     capture: { ...DEFAULT_CAPTURE_OPTIONS },
-    siteSettingsName: null,
+    siteSettingsId: null,
   };
 }
+
+// ---- サイト設定（設計書 4.1、6.5。S-05, J-02, J-03, J-07, J-08） ----
+
+export type SiteSettings = {
+  name: string;
+  hostPatterns: string[]; // 例: ['*.notion.site']
+  waitForSelector?: string; // J-02
+  hideSelectors: string[]; // S-05
+  hideByText: string[]; // S-05 文字列で探して隠す
+  scrollContainerSelector?: string; // J-03（手動指定）
+  beforeCaptureScript?: string; // J-07
+  expandTogglesScript?: string; // J-09（expandToggles が true のときだけ実行）
+  reloadPerViewport: boolean; // 画面幅ごとに開き直すか（設計書 6.1）
+  concurrency?: number; // C-11 の上書き
+  intervalMs?: number; // C-11 の上書き
+};
+
+export const DEFAULT_SITE_SETTINGS: SiteSettings = {
+  name: '標準',
+  hostPatterns: [],
+  hideSelectors: [],
+  hideByText: [],
+  reloadPerViewport: true,
+};
+
+// builtin: 組み込みのプリセット（編集・削除できない）
+export type SiteSettingsItem = SiteSettings & { id: string; builtin: boolean };
 
 // ---- 進捗イベント（設計書 8.1） ----
 
@@ -99,8 +127,10 @@ export type CrawlSummary = {
 
 export type CrawlDetail = CrawlSummary & {
   settings: CrawlSettings;
-  siteSettingsName: string;
+  siteSettingsName: string; // 撮影開始時に使ったサイト設定の名前
   authProfileName: string | null; // 使ったログイン状態（削除済みなら null）
+  warnings: string[]; // 撮影中に出た警告（ログイン切れ、アクセス制限など）
+  retryableCount: number; // 撮り直せるページ数（失敗と、止めたときに残った撮影待ち）
   outputDir: string;
   errorMessage: string | null;
 };
@@ -129,14 +159,6 @@ export type PageItem = {
   errorMessage: string | null;
   waitTimedOut: boolean;
   shots: ShotItem[];
-};
-
-export type SiteSettingsInfo = {
-  name: string;
-  hostPatterns: string[];
-  reloadPerViewport: boolean;
-  concurrency: number | null;
-  intervalMs: number | null;
 };
 
 // ---- 比較（V-05, V-05b、設計書 9.4） ----

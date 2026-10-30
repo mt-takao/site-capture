@@ -2,7 +2,8 @@ import type { Browser, BrowserContext, BrowserContextOptions } from 'playwright'
 import { BlockedError } from '../capture/blocked.js';
 import { capturePage, createCaptureContext, NotHtmlError, PageTimeoutError } from '../capture/capture-page.js';
 import { HostGate, withRateLimitRetry } from '../capture/host-gate.js';
-import { viewportForWidth, type SiteSettings } from '../capture/types.js';
+import type { SiteSettingsItem } from '@site-capture/shared';
+import { viewportForWidth } from '../capture/types.js';
 import { contextFetchText } from '../crawler/fetch-text.js';
 import { normalizeUrl } from '../crawler/normalize.js';
 import { loadRobots, type RobotsRules } from '../crawler/robots.js';
@@ -11,7 +12,7 @@ import { checkScope, isSameSite } from '../crawler/scope.js';
 import { loadSitemapUrls } from '../crawler/sitemap.js';
 import type { CrawlEvent, CrawlSettings, SkipReason } from '../crawler/types.js';
 import type { CrawlStatus, Store } from '../db/store.js';
-import { BUILTIN_PRESETS, findSiteSettings } from '../presets/index.js';
+import { resolveSiteSettings } from '../presets/index.js';
 
 // 設計書 5.1「処理の流れ」: 1つの撮影セッション（起点URLから巡回して全ページを撮る）を実行する
 
@@ -22,16 +23,19 @@ class StoppedError extends Error {}
 export type CrawlRunnerInput = {
   store: Store;
   browser: Browser;
-  settings: CrawlSettings;
-  outputDir: string;
   contextOptions?: BrowserContextOptions; // ログイン状態・Basic 認証（M4）
-};
+} & (
+  | { settings: CrawlSettings; outputDir: string } // 新しく撮る
+  | { resumeCrawlId: number } // S-08: 既存の撮影セッションの撮影待ちのページを撮り直す
+);
 
 export class CrawlRunner {
   readonly crawlId: number;
   private readonly store: Store;
   private readonly settings: CrawlSettings;
-  private readonly site: SiteSettings;
+  private readonly site: SiteSettingsItem;
+  private readonly outputDir: string;
+  private readonly resuming: boolean;
   private listeners: Array<(e: CrawlEvent) => void> = [];
   private queue: QueueItem[] = [];
   private admitted = 0;
@@ -43,16 +47,29 @@ export class CrawlRunner {
 
   constructor(private readonly input: CrawlRunnerInput) {
     this.store = input.store;
-    this.settings = input.settings;
-    this.site = input.settings.siteSettingsName
-      ? (BUILTIN_PRESETS.find((p) => p.name === input.settings.siteSettingsName) ?? findSiteSettings(input.settings.startUrl))
-      : findSiteSettings(input.settings.startUrl);
-    this.sampler = new Sampler(input.settings.sampling);
-    this.crawlId = this.store.createCrawl(input.settings, input.outputDir);
+    if ('resumeCrawlId' in input) {
+      // 撮り直しでは、最初に撮ったときの設定とサイト設定をそのまま使う
+      const row = this.store.getCrawl(input.resumeCrawlId);
+      if (!row) throw new Error(`撮影セッション #${input.resumeCrawlId} が見つかりません`);
+      this.crawlId = row.id;
+      this.settings = JSON.parse(row.settings_json) as CrawlSettings;
+      this.site = row.site_settings_json
+        ? (JSON.parse(row.site_settings_json) as SiteSettingsItem)
+        : resolveSiteSettings(this.store, this.settings);
+      this.outputDir = row.output_dir;
+      this.resuming = true;
+    } else {
+      this.settings = input.settings;
+      this.site = resolveSiteSettings(this.store, input.settings);
+      this.outputDir = input.outputDir;
+      this.resuming = false;
+      this.crawlId = this.store.createCrawl(input.settings, input.outputDir, this.site);
+    }
+    this.sampler = new Sampler(this.settings.sampling);
     this.stopSignal = new Promise((resolve) => (this.resolveStop = resolve));
   }
 
-  get siteSettings(): SiteSettings {
+  get siteSettings(): SiteSettingsItem {
     return this.site;
   }
 
@@ -87,10 +104,14 @@ export class CrawlRunner {
       }
       const gate = new HostGate(intervalMs, Date.now, (ms) => this.interruptibleSleep(ms));
 
-      this.enqueue(settings.startUrl, 0, null);
-      if (settings.useSitemap) {
-        const urls = await loadSitemapUrls(settings.startUrl, this.robots.sitemaps, fetchText);
-        for (const url of urls) this.enqueue(url, 1, null);
+      if (this.resuming) {
+        this.restoreQueue();
+      } else {
+        this.enqueue(settings.startUrl, 0, null);
+        if (settings.useSitemap) {
+          const urls = await loadSitemapUrls(settings.startUrl, this.robots.sitemaps, fetchText);
+          for (const url of urls) this.enqueue(url, 1, null);
+        }
       }
 
       await this.runWorkers(context, gate, concurrency);
@@ -105,6 +126,16 @@ export class CrawlRunner {
       this.emit({ type: 'crawl-finished', status });
     }
     return status;
+  }
+
+  // 撮り直し: 撮影待ちのページをキューに戻す。最大ページ数と間引きの数え方も、撮影済みのページから引き継ぐ
+  private restoreQueue(): void {
+    for (const p of this.store.listPages(this.crawlId)) {
+      if (p.status === 'skipped') continue;
+      this.admitted++;
+      this.sampler.admit(p.normalized_url);
+      if (p.status === 'queued') this.queue.push({ pageId: p.id, url: p.url, depth: p.depth });
+    }
   }
 
   private async runWorkers(context: BrowserContext, gate: HostGate, concurrency: number): Promise<void> {
@@ -153,7 +184,7 @@ export class CrawlRunner {
             context,
             url: item.url,
             viewports: settings.viewports.map(viewportForWidth),
-            outDir: this.input.outputDir,
+            outDir: this.outputDir,
             options: settings.capture,
             site: this.site,
             log: (message) => this.emit({ type: 'warning', message }),
@@ -256,6 +287,7 @@ export class CrawlRunner {
   }
 
   private emit(e: CrawlEvent): void {
+    if (e.type === 'warning') this.store.addCrawlWarning(this.crawlId, e.message);
     for (const l of this.listeners) l(e);
   }
 }

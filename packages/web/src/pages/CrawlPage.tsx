@@ -4,7 +4,7 @@ import type { PageItem } from '@site-capture/shared';
 import { Segmented } from '../components/Segmented';
 import { Badge, CrawlStatusBadge, PageStatusBadge } from '../components/StatusBadge';
 import { api, useCrawl } from '../lib/api';
-import { formatDateTime, formatDuration, pageName, shotFor, skipReasonLabel } from '../lib/format';
+import { failureHint, formatDateTime, formatDuration, pageName, shotFor, skipReasonLabel } from '../lib/format';
 import { buildTree, inPrefix, type TreeNode } from '../lib/tree';
 import styles from './CrawlPage.module.css';
 
@@ -21,6 +21,7 @@ export function CrawlPage() {
   const [prefix, setPrefix] = useState('/');
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [retryAuth, setRetryAuth] = useState<{ username: string; password: string } | null>(null);
 
   const viewports = crawl?.viewports ?? [];
   const currentWidth = width ?? viewports[0] ?? 1440;
@@ -48,12 +49,31 @@ export function CrawlPage() {
   const target = counts.found - counts.skipped;
   const progress = target > 0 ? Math.round(((counts.done + counts.failed) / target) * 100) : 0;
   const timedOutCount = pages.filter((p) => p.waitTimedOut).length;
+  // 残しておいた警告と、いま届いた警告をまとめて表示する
+  const allWarnings = [...new Set([...crawl.warnings, ...warnings])];
 
   const stop = async () => {
     setBusy(true);
     setActionError(null);
     try {
       await api.stopCrawl(id);
+    } catch (e) {
+      setActionError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  // S-08: 失敗と撮影待ちのページを撮り直す。Basic 認証を使った撮影は ID とパスワードを入れ直してもらう
+  const retry = async () => {
+    if (crawl.settings.usesBasicAuth && !retryAuth) {
+      setRetryAuth({ username: '', password: '' });
+      return;
+    }
+    setBusy(true);
+    setActionError(null);
+    try {
+      await api.retryCrawl(id, retryAuth?.username ? retryAuth : null);
+      setRetryAuth(null);
     } catch (e) {
       setActionError((e as Error).message);
     } finally {
@@ -97,9 +117,23 @@ export function CrawlPage() {
             </button>
           ) : (
             <>
+              {crawl.retryableCount > 0 && (
+                <button type="button" className="btn btn-primary" onClick={retry} disabled={busy}>
+                  撮り直す（{crawl.retryableCount}ページ）
+                </button>
+              )}
               <Link to={`/compare?b=${id}`} className="btn">
                 ほかの撮影と比較
               </Link>
+              <Link to={`/new?from=${id}`} className="btn">
+                同じ設定で新しく撮る
+              </Link>
+              <a href={`/api/crawls/${id}/export.zip`} className="btn" download>
+                ZIP
+              </a>
+              <a href={`/api/crawls/${id}/export.csv`} className="btn" download>
+                CSV
+              </a>
               <button type="button" className="btn btn-danger" onClick={remove} disabled={busy}>
                 削除
               </button>
@@ -119,9 +153,35 @@ export function CrawlPage() {
         <div className={styles.bar} role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
           <div className={`${styles.barFill} ${running ? '' : styles.barDone}`} style={{ width: `${running ? progress : 100}%` }} />
         </div>
-        {warnings.length > 0 && (
+        {retryAuth && (
+          <form
+            className={styles.retryAuth}
+            onSubmit={(e) => {
+              e.preventDefault();
+              void retry();
+            }}
+          >
+            <span>この撮影は Basic 認証を使いました。撮り直すには ID とパスワードをもう一度入力してください（保存しません）。</span>
+            <input className="input" placeholder="ID" autoComplete="off" value={retryAuth.username} onChange={(e) => setRetryAuth({ ...retryAuth, username: e.target.value })} />
+            <input
+              className="input"
+              type="password"
+              placeholder="パスワード"
+              autoComplete="new-password"
+              value={retryAuth.password}
+              onChange={(e) => setRetryAuth({ ...retryAuth, password: e.target.value })}
+            />
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              撮り直す
+            </button>
+            <button type="button" className="btn" onClick={() => setRetryAuth(null)}>
+              やめる
+            </button>
+          </form>
+        )}
+        {allWarnings.length > 0 && (
           <ul className={styles.warnings}>
-            {warnings.slice(-3).map((w, i) => (
+            {allWarnings.slice(-5).map((w, i) => (
               <li key={i}>{w}</li>
             ))}
           </ul>
@@ -237,6 +297,7 @@ function PageCard({ page, crawlId, width }: { page: PageItem; crawlId: number; w
           </div>
         ) : null}
         {page.errorMessage && <span className={styles.cardError}>{page.errorMessage}</span>}
+        {failureHint(page.errorMessage) && <span className={styles.cardHint}>{failureHint(page.errorMessage)}</span>}
       </div>
     </>
   );

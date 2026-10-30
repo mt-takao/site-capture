@@ -31,6 +31,30 @@ export class JobManager {
     const browser = await this.browser;
     const runner = new CrawlRunner({ store: this.store, browser, settings, outputDir: this.outputDirFor(settings), contextOptions });
     if (settings.authProfileId) this.store.touchAuthProfile(settings.authProfileId);
+    return this.launch(runner);
+  }
+
+  // S-08: 失敗したページと、止めたときに残った撮影待ちのページを、同じ撮影セッションの中で撮り直す。
+  // Basic 認証は保存していないので、使う場合は撮り直すときにもう一度受け取る
+  async retry(
+    crawlId: number,
+    secrets: { basicAuth?: { username: string; password: string } | null } = {},
+  ): Promise<{ crawlId: number; finished: Promise<void> }> {
+    if (this.runners.has(crawlId)) throw new StartCrawlError('この撮影は実行中です');
+    const row = this.store.getCrawl(crawlId);
+    if (!row) throw new StartCrawlError('撮影セッションが見つかりません');
+    if (this.store.countRetryable(crawlId) === 0) throw new StartCrawlError('撮り直すページがありません');
+    const settings = JSON.parse(row.settings_json) as CrawlSettings;
+    const contextOptions = this.contextOptionsFor(settings, secrets.basicAuth ?? null);
+    this.browser ??= this.launchBrowser();
+    const browser = await this.browser;
+    this.store.prepareRetry(crawlId);
+    const runner = new CrawlRunner({ store: this.store, browser, resumeCrawlId: crawlId, contextOptions });
+    if (settings.authProfileId) this.store.touchAuthProfile(settings.authProfileId);
+    return this.launch(runner);
+  }
+
+  private launch(runner: CrawlRunner): { crawlId: number; finished: Promise<void> } {
     const id = runner.crawlId;
     this.runners.set(id, runner);
     runner.subscribe((e) => {
@@ -66,10 +90,6 @@ export class JobManager {
 
   isRunning(id: number): boolean {
     return this.runners.has(id);
-  }
-
-  siteSettingsName(id: number): string | null {
-    return this.runners.get(id)?.siteSettings.name ?? null;
   }
 
   stop(id: number): boolean {

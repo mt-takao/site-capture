@@ -1,13 +1,14 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { chromium } from 'playwright';
-import type { AuthProfileItem, CompareResult, CrawlDetail, CrawlEvent, CrawlSummary, LoginSessionInfo, PageItem, StreamMessage } from '@site-capture/shared';
+import type { AuthProfileItem, CompareResult, SiteSettingsItem, CrawlDetail, CrawlEvent, CrawlSummary, LoginSessionInfo, PageItem, StreamMessage } from '@site-capture/shared';
 import { LoginSessionManager } from '../src/auth/login-sessions.js';
 import { buildServer } from '../src/api/server.js';
 import { Store } from '../src/db/store.js';
@@ -241,6 +242,8 @@ test('ログインせずに会員ページを撮ると、ログイン画面に�
   const r = await crawlAndWait(fastSettings({ startUrl: `${site.origin}/members`, maxPages: 1 }));
   const warning = r.events.find((e) => e.type === 'warning');
   assert.ok(warning && warning.type === 'warning' && warning.message.includes('ログイン画面'));
+  // 警告はデータベースにも残り、撮影が終わった後も見られる
+  assert.ok(r.detail.warnings.some((w) => w.includes('ログイン画面')));
   assert.equal(r.pages[0]!.title, 'ログイン');
 });
 
@@ -275,6 +278,7 @@ test('Basic 認証の ID とパスワードは撮影に使うが、保存しな�
   assert.equal(withAuth.pages[0]!.title, 'Basic認証のページ');
   const row = store.getCrawl(withAuth.detail.id)!;
   assert.ok(!row.settings_json.includes('basicAuth'));
+  assert.equal(withAuth.detail.settings.usesBasicAuth, true);
   assert.ok(!row.settings_json.includes('pass"'));
 
   const without = await crawlAndWait(fastSettings({ startUrl: `${site.origin}/basic`, maxPages: 1 }));
@@ -314,4 +318,103 @@ test('比較の指定が正しくなければ 404 か 400 を返す', async () =
   const same = await api<{ error: string }>(`/api/compare?a=${one.id}&b=${one.id}`);
   assert.equal(same.status, 400);
   assert.match(same.body.error, /別々の撮影/);
+});
+
+// ---- 仕上げ（M6） ----
+
+test('失敗したページだけを撮り直せる', async () => {
+  const r = await crawlAndWait(
+    fastSettings({ startUrl: `${site.origin}/flaky`, maxPages: 1, capture: { quietWindowMs: 200, maxWaitMs: 3000, extraWaitMs: 0, pageTimeoutMs: 2000 } }),
+  );
+  assert.equal(r.pages[0]!.status, 'failed');
+  assert.match(r.pages[0]!.errorMessage!, /タイムアウト/);
+  assert.equal(r.detail.retryableCount, 1);
+
+  const retried = await api<CrawlDetail>(`/api/crawls/${r.detail.id}/retry`, { method: 'POST' });
+  assert.equal(retried.status, 200);
+  assert.equal(retried.body.id, r.detail.id);
+  const after = await waitUntilFinished(r.detail.id);
+  assert.equal(after.status, 'done');
+  assert.equal(after.retryableCount, 0);
+  assert.deepEqual([after.counts.done, after.counts.failed], [1, 0]);
+
+  // 撮り直すものがなければ 400
+  const nothing = await api<{ error: string }>(`/api/crawls/${r.detail.id}/retry`, { method: 'POST' });
+  assert.equal(nothing.status, 400);
+  assert.match(nothing.body.error, /撮り直すページがありません/);
+});
+
+test('止めた撮影は、残ったページを撮り直しで続きから撮れる', async () => {
+  const created = await api<CrawlDetail>('/api/crawls', { method: 'POST', body: JSON.stringify(fastSettings({ maxPages: 6 })) });
+  const id = created.body.id;
+  await new Promise((r) => setTimeout(r, 300));
+  await api(`/api/crawls/${id}/stop`, { method: 'POST' });
+  const stopped = await waitUntilFinished(id);
+  assert.equal(stopped.status, 'stopped');
+  assert.ok(stopped.retryableCount > 0);
+
+  await api(`/api/crawls/${id}/retry`, { method: 'POST' });
+  const resumed = await waitUntilFinished(id);
+  assert.equal(resumed.status, 'done');
+  // 最大ページ数は撮り直しでも守られる
+  assert.equal(resumed.counts.done, 6);
+});
+
+test('ページ一覧を CSV で、画像を ZIP で書き出せる', async () => {
+  const r = await crawlAndWait(fastSettings({ maxPages: 3 }));
+  const csvRes = await fetch(`${base}/api/crawls/${r.detail.id}/export.csv`);
+  assert.match(csvRes.headers.get('content-type') ?? '', /text\/csv/);
+  assert.match(csvRes.headers.get('content-disposition') ?? '', /attachment; filename="127\.0\.0\.1-\d+_\d{8}-\d{4}\.csv"/);
+  // Excel 向けに先頭へ BOM（EF BB BF）を付ける。text() は BOM を取り除くので、バイト列で確かめる
+  const bytes = Buffer.from(await csvRes.arrayBuffer());
+  assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf]);
+  const lines = bytes.subarray(3).toString('utf8').trim().split('\r\n');
+  assert.match(lines[0]!, /^URL,パス,タイトル,ステータスコード,状態/);
+  assert.equal(lines.length, 1 + r.pages.length);
+  assert.ok(lines.some((l) => l.includes('index__800.png')));
+
+  const zipRes = await fetch(`${base}/api/crawls/${r.detail.id}/export.zip`);
+  assert.equal(zipRes.headers.get('content-type'), 'application/zip');
+  const zipPath = join(home, 'export.zip');
+  await writeFile(zipPath, Buffer.from(await zipRes.arrayBuffer()));
+  const listing = execFileSync('unzip', ['-l', zipPath], { encoding: 'utf8' });
+  assert.equal((listing.match(/\.png/g) ?? []).length, 3);
+  assert.match(listing, /pages\.csv/);
+});
+
+test('サイト設定を作って編集・削除でき、組み込みより優先して選ばれる', async () => {
+  const bad = await api<{ error: string }>('/api/site-settings', { method: 'POST', body: JSON.stringify({ name: 'x', hostPatterns: ['https://a.com/'] }) });
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.error, /形式が正しくありません/);
+  assert.equal((await api('/api/site-settings', { method: 'POST', body: JSON.stringify({ name: 'x', hostPatterns: [] }) })).status, 400);
+
+  const created = await api<SiteSettingsItem>('/api/site-settings', {
+    method: 'POST',
+    body: JSON.stringify({ name: 'テストサイト', hostPatterns: ['127.0.0.1'], hideSelectors: ['#banner', ' '], hideByText: ['閉じる'], intervalMs: 100 }),
+  });
+  assert.equal(created.status, 201);
+  assert.deepEqual(created.body.hideSelectors, ['#banner']);
+  assert.equal(created.body.builtin, false);
+
+  const all = await api<SiteSettingsItem[]>('/api/site-settings');
+  assert.equal(all.body[0]!.id, created.body.id);
+  assert.ok(all.body.some((s) => s.id === 'builtin:notion'));
+
+  const match = await api<SiteSettingsItem>(`/api/site-settings/match?url=${encodeURIComponent(`${site.origin}/`)}`);
+  assert.equal(match.body.id, created.body.id);
+  const r = await crawlAndWait(fastSettings({ maxPages: 1 }));
+  assert.equal(r.detail.siteSettingsName, 'テストサイト');
+
+  const updated = await api<SiteSettingsItem>(`/api/site-settings/${created.body.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ ...created.body, name: 'テストサイト2' }),
+  });
+  assert.equal(updated.body.name, 'テストサイト2');
+  // 撮影結果には、撮ったときのサイト設定の名前が残る
+  assert.equal((await api<CrawlDetail>(`/api/crawls/${r.detail.id}`)).body.siteSettingsName, 'テストサイト');
+
+  assert.equal((await api('/api/site-settings/builtin:notion', { method: 'PUT', body: JSON.stringify(created.body) })).status, 400);
+  assert.equal((await api('/api/site-settings/builtin:notion', { method: 'DELETE' })).status, 400);
+  assert.equal((await api(`/api/site-settings/${created.body.id}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await api(`/api/site-settings/${created.body.id}`, { method: 'DELETE' })).status, 404);
 });

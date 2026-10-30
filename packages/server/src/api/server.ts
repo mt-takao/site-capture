@@ -2,16 +2,17 @@ import { createReadStream, existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import fastifyStatic from '@fastify/static';
+import { ZipArchive } from 'archiver';
 import Fastify, { type FastifyInstance } from 'fastify';
-import type { SiteSettingsInfo, StreamMessage } from '@site-capture/shared';
+import type { CrawlSettings, StreamMessage } from '@site-capture/shared';
 import type { Store } from '../db/store.js';
 import { authProfileItem, deleteAuthProfile, LoginSessionError, type LoginSessionManager } from '../auth/login-sessions.js';
 import { StartCrawlError, type JobManager } from '../jobs/job-manager.js';
 import { dataRoot } from '../paths.js';
-import { BUILTIN_PRESETS, findSiteSettings } from '../presets/index.js';
-import type { SiteSettings } from '../capture/types.js';
+import { pagesCsv } from '../export/csv.js';
+import { allSiteSettings, findSiteSettings } from '../presets/index.js';
 import { compareCrawls, crawlDetail, crawlSummary, pageItems } from './dto.js';
-import { parseBasicAuth, parseCrawlSettings, ValidationError } from './validate.js';
+import { parseBasicAuth, parseCrawlSettings, parseSiteSettings, ValidationError } from './validate.js';
 
 // 設計書 8章「API」。画面（packages/web）のビルド結果があれば、それも配信する
 
@@ -51,6 +52,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   app.post('/api/crawls', async (req, reply) => {
     const settings = parseCrawlSettings(req.body);
     const basicAuth = parseBasicAuth(req.body);
+    settings.usesBasicAuth = !!basicAuth;
     const { crawlId } = await jobs.start(settings, { basicAuth });
     return reply.code(201).send(crawlDetail(store.getCrawl(crawlId)!, store));
   });
@@ -65,6 +67,41 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     const id = Number(req.params.id);
     if (!crawlOr404(id)) return reply.code(404).send({ error: '撮影セッションが見つかりません' });
     return pageItems(id, store);
+  });
+
+  // S-08: 失敗したページと、止めたときに残った撮影待ちのページを撮り直す
+  app.post<{ Params: { id: string } }>('/api/crawls/:id/retry', async (req, reply) => {
+    const id = Number(req.params.id);
+    if (!crawlOr404(id)) return reply.code(404).send({ error: '撮影セッションが見つかりません' });
+    if (jobs.isRunning(id)) return reply.code(409).send({ error: 'この撮影は実行中です' });
+    await jobs.retry(id, { basicAuth: parseBasicAuth(req.body ?? null) });
+    return crawlDetail(store.getCrawl(id)!, store);
+  });
+
+  // V-07: ページ一覧の CSV
+  app.get<{ Params: { id: string } }>('/api/crawls/:id/export.csv', async (req, reply) => {
+    const row = crawlOr404(Number(req.params.id));
+    if (!row) return reply.code(404).send({ error: '撮影セッションが見つかりません' });
+    const widths = (JSON.parse(row.settings_json) as CrawlSettings).viewports;
+    const csv = pagesCsv(pageItems(row.id, store), widths, (shotId) => store.getShot(shotId)?.file_path);
+    return reply
+      .type('text/csv; charset=utf-8')
+      .header('content-disposition', attachment(`${exportName(row)}.csv`))
+      .send(csv);
+  });
+
+  // V-06: 画像をまとめた ZIP。ページ一覧の CSV も入れる
+  app.get<{ Params: { id: string } }>('/api/crawls/:id/export.zip', async (req, reply) => {
+    const row = crawlOr404(Number(req.params.id));
+    if (!row) return reply.code(404).send({ error: '撮影セッションが見つかりません' });
+    const name = exportName(row);
+    const widths = (JSON.parse(row.settings_json) as CrawlSettings).viewports;
+    const shots = store.listShotsForCrawl(row.id).filter((s) => existsSync(s.file_path));
+    const zip = new ZipArchive({ zlib: { level: 1 } }); // PNG はもう圧縮されているので、速さを優先する
+    for (const s of shots) zip.file(s.file_path, { name: `${name}/${s.file_path.split(sep).at(-1)}` });
+    zip.append(pagesCsv(pageItems(row.id, store), widths, (shotId) => store.getShot(shotId)?.file_path), { name: `${name}/pages.csv` });
+    void zip.finalize();
+    return reply.type('application/zip').header('content-disposition', attachment(`${name}.zip`)).send(zip);
   });
 
   app.post<{ Params: { id: string } }>('/api/crawls/:id/stop', async (req, reply) => {
@@ -163,12 +200,30 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     return { ok: true };
   });
 
-  app.get('/api/site-settings', async () => BUILTIN_PRESETS.map(siteInfo));
+  // ---- サイト設定（S-05, J-02, J-03, J-07）。組み込みのプリセットは編集・削除できない ----
 
-  // 撮影開始画面で、入力されたURLに合うサイト設定（プリセット）を示すため
+  app.get('/api/site-settings', async () => allSiteSettings(store));
+
+  app.post('/api/site-settings', async (req, reply) => reply.code(201).send(store.createSiteSettings(parseSiteSettings(req.body))));
+
+  app.put<{ Params: { id: string } }>('/api/site-settings/:id', async (req, reply) => {
+    if (req.params.id.startsWith('builtin:')) return reply.code(400).send({ error: '組み込みのサイト設定は編集できません。複製して編集してください' });
+    const updated = store.updateSiteSettings(req.params.id, parseSiteSettings(req.body));
+    if (!updated) return reply.code(404).send({ error: 'サイト設定が見つかりません' });
+    return updated;
+  });
+
+  app.delete<{ Params: { id: string } }>('/api/site-settings/:id', async (req, reply) => {
+    if (req.params.id.startsWith('builtin:')) return reply.code(400).send({ error: '組み込みのサイト設定は削除できません' });
+    if (!store.deleteSiteSettings(req.params.id)) return reply.code(404).send({ error: 'サイト設定が見つかりません' });
+    return { ok: true };
+  });
+
+  // 撮影開始画面で、入力されたURLに合うサイト設定を示すため
   app.get<{ Querystring: { url?: string } }>('/api/site-settings/match', async (req, reply) => {
     try {
-      return siteInfo(findSiteSettings(new URL(req.query.url ?? '').href));
+      const all = allSiteSettings(store);
+      return findSiteSettings(new URL(req.query.url ?? '').href, all.slice(0, -1));
     } catch {
       return reply.code(400).send({ error: 'URLの形式が正しくありません' });
     }
@@ -187,12 +242,14 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   return app;
 }
 
-function siteInfo(s: SiteSettings): SiteSettingsInfo {
-  return {
-    name: s.name,
-    hostPatterns: s.hostPatterns,
-    reloadPerViewport: s.reloadPerViewport,
-    concurrency: s.concurrency ?? null,
-    intervalMs: s.intervalMs ?? null,
-  };
+// 書き出すファイルの名前。例: example.com_20261030-1033
+function exportName(row: { start_url: string; created_at: string }): string {
+  const d = new Date(row.created_at);
+  const p = (n: number) => String(n).padStart(2, '0');
+  const host = new URL(row.start_url).host.replace(/[^a-z0-9.-]/gi, '-');
+  return `${host}_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+}
+
+function attachment(filename: string): string {
+  return `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }

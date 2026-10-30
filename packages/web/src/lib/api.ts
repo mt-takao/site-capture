@@ -7,7 +7,8 @@ import type {
   CrawlSummary,
   LoginSessionInfo,
   PageItem,
-  SiteSettingsInfo,
+  SiteSettings,
+  SiteSettingsItem,
   StartCrawlRequest,
   StreamMessage,
 } from '@site-capture/shared';
@@ -34,7 +35,14 @@ export const api = {
   startCrawl: (req: StartCrawlRequest) => request<CrawlDetail>('/api/crawls', { method: 'POST', body: JSON.stringify(req) }),
   stopCrawl: (id: number) => request<{ ok: true }>(`/api/crawls/${id}/stop`, { method: 'POST' }),
   deleteCrawl: (id: number) => request<{ ok: true }>(`/api/crawls/${id}`, { method: 'DELETE' }),
-  matchSiteSettings: (url: string) => request<SiteSettingsInfo>(`/api/site-settings/match?url=${encodeURIComponent(url)}`),
+  retryCrawl: (id: number, basicAuth: { username: string; password: string } | null) =>
+    request<CrawlDetail>(`/api/crawls/${id}/retry`, { method: 'POST', body: JSON.stringify({ basicAuth }) }),
+  matchSiteSettings: (url: string) => request<SiteSettingsItem>(`/api/site-settings/match?url=${encodeURIComponent(url)}`),
+  listSiteSettings: () => request<SiteSettingsItem[]>('/api/site-settings'),
+  createSiteSettings: (s: SiteSettings) => request<SiteSettingsItem>('/api/site-settings', { method: 'POST', body: JSON.stringify(s) }),
+  updateSiteSettings: (id: string, s: SiteSettings) =>
+    request<SiteSettingsItem>(`/api/site-settings/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(s) }),
+  deleteSiteSettings: (id: string) => request<{ ok: true }>(`/api/site-settings/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   compare: (a: number, b: number) => request<CompareResult>(`/api/compare?a=${a}&b=${b}`),
   listAuthProfiles: () => request<AuthProfileItem[]>('/api/auth-profiles'),
   deleteAuthProfile: (id: string) => request<{ ok: true }>(`/api/auth-profiles/${id}`, { method: 'DELETE' }),

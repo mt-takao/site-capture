@@ -71,4 +71,10 @@ export const MIGRATIONS: string[] = [
     settings_json TEXT    NOT NULL
   );
   `,
+  // M6: 撮影中の警告を残す（画面を開き直しても見られるように）。
+  // 撮影開始時に使ったサイト設定も残す（後で設定を編集・削除しても、撮影時の設定が分かり、撮り直しにも同じものを使うため）
+  `
+  ALTER TABLE crawls ADD COLUMN warnings_json TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE crawls ADD COLUMN site_settings_json TEXT;
+  `,
 ];

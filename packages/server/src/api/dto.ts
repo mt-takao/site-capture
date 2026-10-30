@@ -1,6 +1,7 @@
 import type { ComparePair, CompareResult, CrawlDetail, CrawlSettings, CrawlSummary, PageItem, ShotItem } from '@site-capture/shared';
 import type { CrawlRow, PageRow, ShotRow, Store } from '../db/store.js';
-import { BUILTIN_PRESETS, findSiteSettings } from '../presets/index.js';
+import type { SiteSettingsItem } from '@site-capture/shared';
+import { resolveSiteSettings } from '../presets/index.js';
 
 // データベースの行を API の形（packages/shared の型）に変える
 
@@ -36,15 +37,18 @@ export function crawlSummary(row: CrawlRow, store: Store): CrawlSummary {
 
 export function crawlDetail(row: CrawlRow, store: Store): CrawlDetail {
   const settings = JSON.parse(row.settings_json) as CrawlSettings;
-  const site = settings.siteSettingsName
-    ? (BUILTIN_PRESETS.find((p) => p.name === settings.siteSettingsName) ?? findSiteSettings(settings.startUrl))
-    : findSiteSettings(settings.startUrl);
+  // 撮影開始時に使ったサイト設定を表示する（後で編集・削除されていても、撮ったときのもの）
+  const site = row.site_settings_json
+    ? (JSON.parse(row.site_settings_json) as SiteSettingsItem)
+    : resolveSiteSettings(store, settings);
   const profile = settings.authProfileId ? store.getAuthProfile(settings.authProfileId) : undefined;
   return {
     ...crawlSummary(row, store),
     settings,
     siteSettingsName: site.name,
     authProfileName: profile?.name ?? null,
+    warnings: JSON.parse(row.warnings_json) as string[],
+    retryableCount: store.countRetryable(row.id),
     outputDir: row.output_dir,
     errorMessage: row.error_message,
   };

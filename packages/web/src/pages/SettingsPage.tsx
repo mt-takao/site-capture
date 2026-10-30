@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import type { AuthProfileItem, LoginSessionInfo } from '@site-capture/shared';
+import { SiteSettingsSection } from '../components/SiteSettingsSection';
 import { api } from '../lib/api';
 import { formatDateTime } from '../lib/format';
 import styles from './SettingsPage.module.css';
 
-// 設計書 9.1「設定」: ログイン状態の作成と削除（L-01〜L-03）
+// 設計書 9.1「設定」: ログイン状態の作成と削除（L-01〜L-03）と、サイト設定の編集（S-05, J-02, J-03, J-07）
 
 export function SettingsPage() {
   const [search] = useSearchParams();
@@ -191,6 +192,8 @@ export function SettingsPage() {
           </table>
         )}
       </section>
+
+      <SiteSettingsSection />
     </div>
   );
 }

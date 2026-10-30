@@ -3,7 +3,8 @@ import type { ShotRecord } from '../capture/types.js';
 import type { CrawlSettings, SkipReason } from '../crawler/types.js';
 import { MIGRATIONS } from './schema.js';
 
-import type { CrawlStatus, PageStatus } from '@site-capture/shared';
+import { randomUUID } from 'node:crypto';
+import type { CrawlStatus, PageStatus, SiteSettings, SiteSettingsItem } from '@site-capture/shared';
 
 export type { CrawlStatus, PageStatus };
 
@@ -21,6 +22,8 @@ export type CrawlRow = {
   pages_failed: number;
   pages_skipped: number;
   error_message: string | null;
+  warnings_json: string;
+  site_settings_json: string | null;
 };
 
 export type PageRow = {
@@ -98,14 +101,45 @@ export class Store {
     return r.changes;
   }
 
-  createCrawl(settings: CrawlSettings, outputDir: string): number {
+  createCrawl(settings: CrawlSettings, outputDir: string, site?: SiteSettingsItem): number {
     const r = this.db
       .prepare(
-        `INSERT INTO crawls (start_url, status, settings_json, auth_profile_id, output_dir, created_at)
-         VALUES (?, 'queued', ?, ?, ?, ?)`,
+        `INSERT INTO crawls (start_url, status, settings_json, auth_profile_id, output_dir, created_at, site_settings_json)
+         VALUES (?, 'queued', ?, ?, ?, ?, ?)`,
       )
-      .run(settings.startUrl, JSON.stringify(settings), settings.authProfileId, outputDir, now());
+      .run(settings.startUrl, JSON.stringify(settings), settings.authProfileId, outputDir, now(), site ? JSON.stringify(site) : null);
     return Number(r.lastInsertRowid);
+  }
+
+  // 警告を残す。同じ警告が続いたら1つにまとめ、新しい 20 件だけを残す
+  addCrawlWarning(id: number, message: string): void {
+    const row = this.getCrawl(id);
+    if (!row) return;
+    const warnings = JSON.parse(row.warnings_json) as string[];
+    if (warnings.at(-1) === message) return;
+    warnings.push(message);
+    this.db.prepare(`UPDATE crawls SET warnings_json = ? WHERE id = ?`).run(JSON.stringify(warnings.slice(-20)), id);
+  }
+
+  // S-08: 撮り直すページ（失敗と、止めたときに残った撮影待ち）を撮影待ちに戻し、撮影セッションを再開できる状態にする
+  prepareRetry(id: number): number {
+    return this.db.transaction(() => {
+      const r = this.db
+        .prepare(
+          `UPDATE pages SET status = 'queued', error_message = NULL, updated_at = ?
+           WHERE crawl_id = ? AND status IN ('failed', 'queued', 'capturing')`,
+        )
+        .run(now(), id);
+      this.db.prepare(`UPDATE crawls SET status = 'queued', finished_at = NULL, error_message = NULL WHERE id = ?`).run(id);
+      return r.changes;
+    })();
+  }
+
+  countRetryable(id: number): number {
+    const r = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM pages WHERE crawl_id = ? AND status IN ('failed', 'queued')`)
+      .get(id) as { n: number };
+    return r.n;
   }
 
   updateCrawlStatus(id: number, status: CrawlStatus, errorMessage: string | null = null): void {
@@ -257,5 +291,38 @@ export class Store {
 
   touchAuthProfile(id: string): void {
     this.db.prepare(`UPDATE auth_profiles SET last_used_at = ? WHERE id = ?`).run(now(), id);
+  }
+
+  // ---- サイト設定（S-05, J-02, J-03, J-07） ----
+
+  listSiteSettings(): SiteSettingsItem[] {
+    const rows = this.db.prepare(`SELECT * FROM site_settings WHERE is_builtin = 0 ORDER BY name`).all() as Array<{
+      id: string;
+      settings_json: string;
+    }>;
+    return rows.map((r) => ({ ...(JSON.parse(r.settings_json) as SiteSettings), id: r.id, builtin: false }));
+  }
+
+  getSiteSettings(id: string): SiteSettingsItem | undefined {
+    return this.listSiteSettings().find((s) => s.id === id);
+  }
+
+  createSiteSettings(s: SiteSettings): SiteSettingsItem {
+    const id = randomUUID();
+    this.db
+      .prepare(`INSERT INTO site_settings (id, name, host_pattern, is_builtin, settings_json) VALUES (?, ?, ?, 0, ?)`)
+      .run(id, s.name, s.hostPatterns.join(' '), JSON.stringify(s));
+    return { ...s, id, builtin: false };
+  }
+
+  updateSiteSettings(id: string, s: SiteSettings): SiteSettingsItem | undefined {
+    const r = this.db
+      .prepare(`UPDATE site_settings SET name = ?, host_pattern = ?, settings_json = ? WHERE id = ? AND is_builtin = 0`)
+      .run(s.name, s.hostPatterns.join(' '), JSON.stringify(s), id);
+    return r.changes === 0 ? undefined : { ...s, id, builtin: false };
+  }
+
+  deleteSiteSettings(id: string): boolean {
+    return this.db.prepare(`DELETE FROM site_settings WHERE id = ? AND is_builtin = 0`).run(id).changes > 0;
   }
 }

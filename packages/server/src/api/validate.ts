@@ -1,4 +1,4 @@
-import { defaultCrawlSettings, type CrawlSettings } from '@site-capture/shared';
+import { DEFAULT_SITE_SETTINGS, defaultCrawlSettings, type CrawlSettings, type SiteSettings } from '@site-capture/shared';
 
 // POST /api/crawls の本文を検証し、初期値と合わせた撮影設定にする。問題があれば日本語のメッセージを投げる
 
@@ -57,4 +57,45 @@ function requireInt(v: unknown, min: number, max: number, label: string): void {
   if (typeof v !== 'number' || !Number.isInteger(v) || v < min || v > max) {
     throw new ValidationError(`${label}は ${min}〜${max} の整数で指定してください`);
   }
+}
+
+// サイト設定（S-05, J-02, J-03, J-07）の入力を検証する。CSSセレクタの書き方までは確かめない（撮影時にブラウザが判定する）
+export function parseSiteSettings(body: unknown): SiteSettings {
+  if (!body || typeof body !== 'object') throw new ValidationError('サイト設定がありません');
+  const b = body as Record<string, unknown>;
+  const name = typeof b.name === 'string' ? b.name.trim() : '';
+  if (!name) throw new ValidationError('名前を入力してください');
+  const hostPatterns = stringList(b.hostPatterns, '対象のホスト');
+  if (hostPatterns.length === 0) throw new ValidationError('対象のホストを1つ以上入力してください（例: example.com、*.example.com）');
+  for (const p of hostPatterns) {
+    if (!/^(\*\.)?[a-z0-9.-]+(:\d+)?$/i.test(p) || p.includes('/')) {
+      throw new ValidationError(`対象のホスト「${p}」の形式が正しくありません（例: example.com、*.example.com）`);
+    }
+  }
+  const optionalText = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+  const optionalInt = (v: unknown, min: number, max: number, label: string) => {
+    if (v == null || v === '') return undefined;
+    requireInt(v, min, max, label);
+    return v as number;
+  };
+  return {
+    ...DEFAULT_SITE_SETTINGS,
+    name,
+    hostPatterns: hostPatterns.map((p) => p.toLowerCase()),
+    waitForSelector: optionalText(b.waitForSelector),
+    hideSelectors: stringList(b.hideSelectors, '隠す要素'),
+    hideByText: stringList(b.hideByText, '文字列で隠す要素'),
+    scrollContainerSelector: optionalText(b.scrollContainerSelector),
+    beforeCaptureScript: optionalText(b.beforeCaptureScript),
+    expandTogglesScript: optionalText(b.expandTogglesScript),
+    reloadPerViewport: b.reloadPerViewport !== false,
+    concurrency: optionalInt(b.concurrency, 1, 5, '同時に開くページ数'),
+    intervalMs: optionalInt(b.intervalMs, 0, 600000, 'アクセス間隔'),
+  };
+}
+
+function stringList(v: unknown, label: string): string[] {
+  if (v == null) return [];
+  if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) throw new ValidationError(`${label}の形式が正しくありません`);
+  return (v as string[]).map((x) => x.trim()).filter(Boolean);
 }

@@ -5,8 +5,8 @@ import { chromium } from 'playwright';
 import { BlockedError } from '../capture/blocked.js';
 import { capturePage, createCaptureContext } from '../capture/capture-page.js';
 import { HostGate, withRateLimitRetry } from '../capture/host-gate.js';
-import { DEFAULT_CAPTURE_OPTIONS, DEFAULT_SITE_SETTINGS, viewportForWidth } from '../capture/types.js';
-import { findSiteSettings } from '../presets/index.js';
+import { DEFAULT_CAPTURE_OPTIONS, viewportForWidth } from '../capture/types.js';
+import { DEFAULT_SITE_SETTINGS_ITEM, findSiteSettings } from '../presets/index.js';
 import { captureDir } from '../paths.js';
 
 const { values, positionals } = parseArgs({
@@ -28,7 +28,7 @@ if (!url) {
 const host = new URL(url).hostname;
 const widths = values.widths.split(',').map((w) => Number(w.trim())).filter((w) => w > 0);
 const outDir = values.out ?? captureDir(host, new Date());
-const site = values['no-preset'] ? DEFAULT_SITE_SETTINGS : findSiteSettings(url);
+const site = values['no-preset'] ? DEFAULT_SITE_SETTINGS_ITEM : findSiteSettings(url);
 const options = { ...DEFAULT_CAPTURE_OPTIONS, expandToggles: values['expand-toggles'] };
 
 console.log(`URL: ${url}`);
