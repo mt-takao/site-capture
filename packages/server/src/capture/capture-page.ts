@@ -1,7 +1,7 @@
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, BrowserContextOptions, Page } from 'playwright';
-import { BlockedError, detectBlocked } from './blocked.js';
+import { BlockedError, classifyRateLimited, detectBlocked, waitForRecovery } from './blocked.js';
 import { shotFileName } from './naming.js';
 import {
   collectLinks,
@@ -13,7 +13,7 @@ import {
 } from './prepare.js';
 import { findScrollTarget, scrollThrough } from './scroll.js';
 import { shootDocument, shootExpanded, shootStitched, undoShootModifications, type ShotResult } from './shoot.js';
-import { DOM_OBSERVER_INIT_SCRIPT, NetworkTracker, waitForStable } from './stabilize.js';
+import { DOM_OBSERVER_INIT_SCRIPT, NetworkTracker, waitForStable, type RateLimitedResponse } from './stabilize.js';
 import { makeThumbnail } from './thumbnail.js';
 import type { CaptureOptions, CapturePageResult, ShotRecord, SiteSettings, Viewport } from './types.js';
 
@@ -50,9 +50,21 @@ export type CapturePageInput = {
   options: CaptureOptions;
   site: SiteSettings;
   log?: (message: string) => void;
+  // 429 を返した通信があったときに、読み込んだページごとに全件を渡す（原因の調査用。ほかのサイトの 429 も含む）
+  onRateLimited?: (report: RateLimitReport) => void;
 };
 
-type LoadedPage = { page: Page; network: NetworkTracker; status: number | null; waitTimedOut: boolean };
+export type RateLimitReport = {
+  pageUrl: string;
+  viewportWidth: number;
+  responses: ReadonlyArray<RateLimitedResponse>;
+  classify: ReturnType<typeof classifyRateLimited>;
+};
+
+// ページ側の再送で 429 が回復するのを待つ時間の上限
+const RECOVERY_WAIT_MAX_MS = 10000;
+
+type LoadedPage = { page: Page; network: NetworkTracker; status: number | null; waitTimedOut: boolean; viewportWidth: number };
 
 export async function capturePage(input: CapturePageInput): Promise<CapturePageResult> {
   const { context, url, site, options } = input;
@@ -63,18 +75,29 @@ export async function capturePage(input: CapturePageInput): Promise<CapturePageR
 
   const result: CapturePageResult = { url, finalUrl: url, httpStatus: null, title: '', links: [], shots: [] };
   let loaded: LoadedPage | null = null;
+  const report = (l: LoadedPage | null) => {
+    const responses = l?.network.rateLimitedResponses() ?? [];
+    if (!l || responses.length === 0 || !input.onRateLimited) return;
+    input.onRateLimited({ pageUrl: url, viewportWidth: l.viewportWidth, responses, classify: classifyRateLimited(url, responses) });
+  };
+  // ページを開く前に作り、開くたびに入れ替える（タイムアウトで loaded に入る前に失敗しても、記録を渡せるように）
+  const opened: NetworkTracker[] = [];
   try {
     for (const [i, vp] of viewports.entries()) {
       const shot = await withTimeout(options.pageTimeoutMs, async () => {
         if (site.reloadPerViewport || !loaded) {
-          if (loaded) await loaded.page.close();
-          loaded = await loadPage(context, url, vp, site, options, log);
+          if (loaded) {
+            report(loaded);
+            await loaded.page.close();
+          }
+          loaded = await loadPage(context, url, vp, site, options, log, opened);
         } else {
           // 1回の読み込みで画面幅を切り替えながら撮る（アクセス制限の厳しいサイト向け）
           await undoShootModifications(loaded.page);
           await loaded.page.setViewportSize(vp);
           const stable = await waitForStable(loaded.page, loaded.network, options);
           loaded.waitTimedOut = stable.timedOut;
+          loaded.viewportWidth = vp.width;
         }
         const shot = await shootViewport(loaded, url, vp, input.outDir, site, options, log);
         if (i === 0) {
@@ -89,7 +112,16 @@ export async function capturePage(input: CapturePageInput): Promise<CapturePageR
       result.shots.push(shot);
     }
   } finally {
-    await (loaded as LoadedPage | null)?.page.close().catch(() => {});
+    const last = loaded as LoadedPage | null;
+    if (last) report(last);
+    else if (opened.length > 0 && input.onRateLimited) {
+      // ページ本体が 429 などで loadPage の途中で失敗した場合
+      const responses = opened.at(-1)!.rateLimitedResponses();
+      if (responses.length > 0) {
+        input.onRateLimited({ pageUrl: url, viewportWidth: viewports[0]!.width, responses, classify: classifyRateLimited(url, responses) });
+      }
+    }
+    await last?.page.close().catch(() => {});
   }
   return result;
 }
@@ -102,10 +134,12 @@ async function loadPage(
   site: SiteSettings,
   options: CaptureOptions,
   log: (message: string) => void,
+  opened: NetworkTracker[],
 ): Promise<LoadedPage> {
   const page = await context.newPage();
   await page.setViewportSize(vp);
   const network = new NetworkTracker(page);
+  opened.push(network);
   const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: options.pageTimeoutMs }).catch((e) => {
     // PDF や ZIP などはブラウザがダウンロードとして扱い、ページとして開けない
     if (e instanceof Error && e.message.includes('Download is starting')) throw new NotHtmlError('download');
@@ -122,8 +156,12 @@ async function loadPage(
     });
   }
   let stable = await waitForStable(page, network, options);
-  const blocked = await detectBlocked(page, status, network);
-  if (blocked) throw blocked;
+  // ここではロボット確認とページ本体の制限だけを見る。API などの 429 は、ページ側の再送で回復することがあるので撮影の直前まで待つ
+  const blocked = await detectBlocked(page, status, network, { includePartial: false });
+  if (blocked) {
+    await page.close().catch(() => {});
+    throw blocked;
+  }
 
   const scripts = [site.beforeCaptureScript, options.expandToggles ? site.expandTogglesScript : undefined].filter(
     (s): s is string => !!s,
@@ -131,7 +169,7 @@ async function loadPage(
   for (const script of scripts) await runPageScript(page, script);
   if (scripts.length > 0) stable = await waitForStable(page, network, options);
 
-  return { page, network, status, waitTimedOut: stable.timedOut };
+  return { page, network, status, waitTimedOut: stable.timedOut, viewportWidth: vp.width };
 }
 
 // ⑦〜⑩: スクロール領域を見つけ、末尾まで描画させてから撮る
@@ -153,8 +191,9 @@ async function shootViewport(
   await hideByText(page, site.hideByText);
   await page.waitForTimeout(options.extraWaitMs);
 
-  const limitedBefore = network.rateLimitedResponses().length;
-  const blocked = await detectBlocked(page, loaded.status, network);
+  const recoveryWaitMs = Math.min(RECOVERY_WAIT_MAX_MS, options.maxWaitMs);
+  await waitForRecovery(page, network, recoveryWaitMs);
+  const blocked = await detectBlocked(page, loaded.status, network, { includePartial: true });
   if (blocked) throw blocked;
 
   const filePath = join(outDir, shotFileName(url, vp.width));
@@ -177,10 +216,10 @@ async function shootViewport(
     }
   }
 
-  // 撮っている最中に制限された場合、欠けた画像を残さない（設計書 5.5）
-  if (network.rateLimitedResponses().length > limitedBefore) {
+  // 撮っている最中に同じサイトの通信が制限され、回復しなかった場合は、欠けた画像を残さない（設計書 5.5）
+  if ((await waitForRecovery(page, network, recoveryWaitMs)) > 0) {
     await rm(filePath, { force: true });
-    const after = await detectBlocked(page, loaded.status, network);
+    const after = await detectBlocked(page, loaded.status, network, { includePartial: true });
     throw after ?? new BlockedError('partially-rate-limited', null);
   }
 

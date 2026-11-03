@@ -46,13 +46,24 @@ export const DOM_OBSERVER_INIT_SCRIPT = `(() => {
   start();
 })();`;
 
+// 429 を返した通信の記録（設計書 5.5）。原因の調査と、制限かどうかの判定に使う
+export type RateLimitedResponse = {
+  url: string;
+  method: string;
+  resourceType: string; // document / fetch / xhr / image / script など
+  isDocument: boolean; // ページ本体（メインフレームの読み込み）か
+  retryAfterSec: number | null;
+  at: number; // 受け取った時刻（Date.now()）
+  recovered: boolean; // 同じ通信（メソッド・クエリを除いたURL・送信内容が同じ）が、後で 429 以外を返したか
+};
+
 // ページの通信を数える。ページを開く前に作り、そのページの撮影が終わるまで使い続ける。
 export class NetworkTracker {
   private inflight = new Map<Request, number>();
   private urlCounts = new Map<string, number>();
   private lastActivityAt = Date.now();
   // 読み込み中に 429 を返した通信（設計書 5.5 の「見えにくい制限」の検出に使う）
-  private rateLimited: Array<{ url: string; retryAfterSec: number | null }> = [];
+  private rateLimited: Array<RateLimitedResponse & { key: string }> = [];
 
   constructor(page: Page) {
     page.on('request', (req) => {
@@ -68,12 +79,27 @@ export class NetworkTracker {
     page.on('requestfinished', done);
     page.on('requestfailed', done);
     page.on('response', (res) => {
-      if (res.status() !== 429) return;
-      this.rateLimited.push({ url: res.url(), retryAfterSec: parseRetryAfter(res.headers()['retry-after']) });
+      const req = res.request();
+      const key = requestKey(req);
+      if (res.status() !== 429) {
+        // 再送が成功したら、その通信の 429 は回復したとみなす（ページ側が自分で待って再送するサイトがあるため）
+        for (const r of this.rateLimited) if (r.key === key) r.recovered = true;
+        return;
+      }
+      this.rateLimited.push({
+        key,
+        url: res.url(),
+        method: req.method(),
+        resourceType: req.resourceType(),
+        isDocument: req.isNavigationRequest() && res.frame() === page.mainFrame(),
+        retryAfterSec: parseRetryAfter(res.headers()['retry-after']),
+        at: Date.now(),
+        recovered: false,
+      });
     });
   }
 
-  rateLimitedResponses(): ReadonlyArray<{ url: string; retryAfterSec: number | null }> {
+  rateLimitedResponses(): ReadonlyArray<RateLimitedResponse> {
     return this.rateLimited;
   }
 

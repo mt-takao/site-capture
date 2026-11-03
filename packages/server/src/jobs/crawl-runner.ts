@@ -2,6 +2,7 @@ import type { Browser, BrowserContext, BrowserContextOptions } from 'playwright'
 import { BlockedError } from '../capture/blocked.js';
 import { capturePage, createCaptureContext, NotHtmlError, PageTimeoutError } from '../capture/capture-page.js';
 import { HostGate, withRateLimitRetry } from '../capture/host-gate.js';
+import { formatRateLimitReport } from '../capture/rate-limit-log.js';
 import type { SiteSettingsItem } from '@site-capture/shared';
 import { viewportForWidth } from '../capture/types.js';
 import { contextFetchText } from '../crawler/fetch-text.js';
@@ -188,10 +189,14 @@ export class CrawlRunner {
             options: settings.capture,
             site: this.site,
             log: (message) => this.emit({ type: 'warning', message }),
+            onRateLimited: (report) => console.log(formatRateLimitReport(report, `#${this.crawlId} `)),
           });
         },
         ({ error, waitSec }) =>
-          this.emit({ type: 'warning', message: `アクセス制限（${error.reason}）のため ${waitSec}秒待機中: ${item.url}` }),
+          this.emit({
+            type: 'warning',
+            message: `アクセス制限（${error.reason}）のため ${waitSec}秒待機中: ${item.url}${error.summary ? `（${error.summary}）` : ''}`,
+          }),
       );
       store.completePage(item.pageId, result);
       for (const s of result.shots) this.emit({ type: 'shot-done', pageId: item.pageId, width: s.viewportWidth, thumbPath: s.thumbPath });
@@ -212,7 +217,7 @@ export class CrawlRunner {
       } else {
         const message =
           e instanceof BlockedError
-            ? `アクセス制限（${e.reason}）`
+            ? `アクセス制限（${e.reason}）${e.summary ? ` ${e.summary}` : ''}`
             : e instanceof PageTimeoutError
               ? `タイムアウト（${e.timeoutMs / 1000}秒）`
               : e instanceof Error

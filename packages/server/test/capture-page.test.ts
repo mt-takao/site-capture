@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { chromium, type Browser } from 'playwright';
 import { BlockedError } from '../src/capture/blocked.js';
-import { capturePage, createCaptureContext, NotHtmlError } from '../src/capture/capture-page.js';
+import { capturePage, createCaptureContext, NotHtmlError, type RateLimitReport } from '../src/capture/capture-page.js';
+import { formatRateLimitReport } from '../src/capture/rate-limit-log.js';
 import { collectLinks, hideByText, runPageScript } from '../src/capture/prepare.js';
 import { DEFAULT_CAPTURE_OPTIONS, DEFAULT_SITE_SETTINGS, viewportForWidth, type SiteSettings } from '../src/capture/types.js';
 import { findSiteSettings } from '../src/presets/index.js';
@@ -34,7 +35,7 @@ after(async () => {
   await rm(workDir, { recursive: true, force: true });
 });
 
-async function capture(path: string, site: SiteSettings, outName: string) {
+async function capture(path: string, site: SiteSettings, outName: string, reports: RateLimitReport[] = []) {
   const context = await createCaptureContext(browser);
   try {
     return await capturePage({
@@ -44,6 +45,7 @@ async function capture(path: string, site: SiteSettings, outName: string) {
       outDir: join(workDir, outName),
       options,
       site,
+      onRateLimited: (r) => reports.push(r),
     });
   } finally {
     await context.close();
@@ -145,24 +147,58 @@ describe('ページへの処理', () => {
 });
 
 describe('失敗の扱い', () => {
-  test('裏の通信が 429 を返したら、一部が制限されたとして失敗にし、画像を残さない', async () => {
-    await assert.rejects(capture('/partially-limited.html', DEFAULT_SITE_SETTINGS, 'partial'), (e: unknown) => {
+  test('同じサイトの通信が 429 のまま回復しなければ、一部が制限されたとして失敗にし、画像を残さない', async () => {
+    const reports: RateLimitReport[] = [];
+    await assert.rejects(capture('/partially-limited.html', DEFAULT_SITE_SETTINGS, 'partial', reports), (e: unknown) => {
       assert.ok(e instanceof BlockedError);
       assert.equal(e.reason, 'partially-rate-limited');
       assert.equal(e.retryAfterSec, 1);
+      // 原因を調べられるよう、どの通信かを要約に載せる
+      assert.match(e.summary, /^429: fetch 127\.0\.0\.1:\d+\/api\/limited（未回復）$/);
       return true;
     });
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0]!.classify.unrecovered.length, 1);
     const files = await readdir(join(workDir, 'partial')).catch(() => []);
     assert.ok(!files.some((f) => f.endsWith('.png')));
   });
 
   test('ページ本体が 429 なら制限として失敗にする', async () => {
-    await assert.rejects(capture('/limited-page', DEFAULT_SITE_SETTINGS, 'limited'), (e: unknown) => {
+    const reports: RateLimitReport[] = [];
+    await assert.rejects(capture('/limited-page', DEFAULT_SITE_SETTINGS, 'limited', reports), (e: unknown) => {
       assert.ok(e instanceof BlockedError);
       assert.equal(e.reason, 'rate-limited');
       assert.equal(e.retryAfterSec, 2);
+      assert.match(e.summary, /ページ本体/);
       return true;
     });
+    // 読み込みの途中で失敗しても、記録は渡す
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0]!.classify.document.length, 1);
+  });
+
+  test('同じサイトの通信の 429 が、ページ側の再送で回復すれば撮影を続ける', async () => {
+    const reports: RateLimitReport[] = [];
+    const r = await capture('/recovering.html', DEFAULT_SITE_SETTINGS, 'recovering', reports);
+    assert.equal(r.shots.length, 2);
+    // 1つ目の画面幅で 429 → 回復。2つ目は読み込み直しても 429 は出ない
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0]!.responses[0]!.recovered, true);
+    assert.equal(reports[0]!.responses[0]!.resourceType, 'fetch');
+    assert.equal(reports[0]!.classify.unrecovered.length, 0);
+  });
+
+  test('ほかのサイトの通信の 429 は数えずに撮る（記録には残す）', async () => {
+    const reports: RateLimitReport[] = [];
+    const r = await capture('/cross-site-429.html', DEFAULT_SITE_SETTINGS, 'cross-site', reports);
+    assert.equal(r.shots.length, 2);
+    assert.ok(reports.length >= 1);
+    assert.equal(reports[0]!.classify.otherSite.length, 1);
+    assert.equal(reports[0]!.classify.unrecovered.length, 0);
+    // ターミナルに出す記録では、数えなかった理由も分かるようにする
+    const text = formatRateLimitReport(reports[0]!, '#1 ');
+    assert.match(text, /^#1 \[429\] .*cross-site-429\.html（1440px）: 1件/);
+    assert.match(text, /\[ほかのサイト・数えない\] GET image http:\/\/localhost:\d+\/api\/limited/);
   });
 
   test('HTML 以外は撮らない', async () => {

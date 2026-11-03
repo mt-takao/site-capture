@@ -5,6 +5,7 @@ import { chromium } from 'playwright';
 import { BlockedError } from '../capture/blocked.js';
 import { capturePage, createCaptureContext } from '../capture/capture-page.js';
 import { HostGate, withRateLimitRetry } from '../capture/host-gate.js';
+import { formatRateLimitReport } from '../capture/rate-limit-log.js';
 import { DEFAULT_CAPTURE_OPTIONS, viewportForWidth } from '../capture/types.js';
 import { DEFAULT_SITE_SETTINGS_ITEM, findSiteSettings } from '../presets/index.js';
 import { captureDir } from '../paths.js';
@@ -51,8 +52,10 @@ try {
         options,
         site,
         log: (m) => console.log(`  ${m}`),
+        onRateLimited: (report) => console.log(formatRateLimitReport(report, '  ')),
       }),
-    ({ error, waitSec, attempt }) => console.log(`  アクセス制限（${error.reason}）のため ${waitSec}秒待って撮り直します（${attempt}回目）`),
+    ({ error, waitSec, attempt }) =>
+      console.log(`  アクセス制限（${error.reason}）のため ${waitSec}秒待って撮り直します（${attempt}回目）${error.summary ? ` ${error.summary}` : ''}`),
   );
   console.log(`ステータス: ${result.httpStatus} / タイトル: ${result.title} / リンク: ${result.links.length}件`);
   for (const s of result.shots) {
@@ -63,7 +66,8 @@ try {
   }
   console.log(`所要時間: ${((Date.now() - startedAt) / 1000).toFixed(1)}秒`);
 } catch (e) {
-  const reason = e instanceof BlockedError ? `アクセス制限（${e.reason}）` : e instanceof Error ? e.message : String(e);
+  const reason =
+    e instanceof BlockedError ? `アクセス制限（${e.reason}）${e.summary ? ` ${e.summary}` : ''}` : e instanceof Error ? e.message : String(e);
   console.error(`撮影に失敗しました: ${reason}`);
   process.exitCode = 1;
 } finally {
