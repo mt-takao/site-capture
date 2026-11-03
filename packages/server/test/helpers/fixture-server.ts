@@ -18,6 +18,11 @@ export async function startFixtureServer(): Promise<{ origin: string; close: () 
       }
       return void res.end('{"ok":true}');
     }
+    // CSP でインラインのスタイルを禁止しているページ（撮影用の CSS を差し込めない場合の確認用）
+    if (path === '/csp-strict.html') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "style-src 'none'" });
+      return void res.end('<!doctype html><title>CSP が厳しいページ</title><h1>インラインのスタイルが禁止されたページ</h1><main style="height:1200px"></main>');
+    }
     // ほかのサイト（localhost）から読み込む画像が 429 を返すページ。127.0.0.1 で開くと、localhost は別のサイトになる
     if (path === '/cross-site-429.html') {
       const port = (req.headers.host ?? '').split(':')[1];

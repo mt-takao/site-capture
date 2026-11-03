@@ -149,7 +149,9 @@ async function loadPage(
   const contentType = (await response?.headerValue('content-type')) ?? '';
   if (contentType && !/text\/html|application\/xhtml\+xml/i.test(contentType)) throw new NotHtmlError(contentType);
 
-  await injectCaptureStyles(page, { hideSelectors: site.hideSelectors, disableAnimations: options.disableAnimations });
+  const styled = await injectCaptureStyles(page, { hideSelectors: site.hideSelectors, disableAnimations: options.disableAnimations });
+  // 隠す要素とアニメーション停止は「あると良い」処理なので、差し込めなくても撮影は続ける
+  if (!styled) log(`撮る前に隠す要素とアニメーション停止の CSS を差し込めませんでした（撮影は続けます）: ${url}`);
   if (site.waitForSelector) {
     await page.waitForSelector(site.waitForSelector, { timeout: options.maxWaitMs }).catch(() => {
       log(`待機対象の要素が表示されませんでした: ${site.waitForSelector}`);

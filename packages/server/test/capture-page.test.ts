@@ -8,7 +8,7 @@ import { chromium, type Browser } from 'playwright';
 import { BlockedError } from '../src/capture/blocked.js';
 import { capturePage, createCaptureContext, NotHtmlError, type RateLimitReport } from '../src/capture/capture-page.js';
 import { formatRateLimitReport } from '../src/capture/rate-limit-log.js';
-import { collectLinks, hideByText, runPageScript } from '../src/capture/prepare.js';
+import { collectLinks, hideByText, injectCaptureStyles, runPageScript } from '../src/capture/prepare.js';
 import { DEFAULT_CAPTURE_OPTIONS, DEFAULT_SITE_SETTINGS, viewportForWidth, type SiteSettings } from '../src/capture/types.js';
 import { findSiteSettings } from '../src/presets/index.js';
 import { startFixtureServer } from './helpers/fixture-server.js';
@@ -118,6 +118,19 @@ describe('ページへの処理', () => {
     await context.close();
   });
 
+  test('隠す要素とアニメーション停止の CSS を差し込み、実際に効いたかを返す', async () => {
+    const context = await createCaptureContext(browser);
+    const page = await context.newPage();
+    await page.goto(`${server.origin}/notion-like.html`);
+    assert.equal(await injectCaptureStyles(page, { hideSelectors: ['.topbar'], disableAnimations: true }), true);
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.topbar')!).visibility), 'hidden');
+
+    // CSP でインラインのスタイルが禁止されたページでは、差し込めなかったことを返す
+    await page.goto(`${server.origin}/csp-strict.html`);
+    assert.equal(await injectCaptureStyles(page, { hideSelectors: ['h1'], disableAnimations: true }), false);
+    await context.close();
+  });
+
   test('文字列で探して、それを含むボタンごと隠す', async () => {
     const context = await createCaptureContext(browser);
     const page = await context.newPage();
@@ -199,6 +212,23 @@ describe('失敗の扱い', () => {
     const text = formatRateLimitReport(reports[0]!, '#1 ');
     assert.match(text, /^#1 \[429\] .*cross-site-429\.html（1440px）: 1件/);
     assert.match(text, /\[ほかのサイト・数えない\] GET image http:\/\/localhost:\d+\/api\/limited/);
+  });
+
+  test('撮影用の CSS を差し込めなくても、警告を出して撮影は続ける', async () => {
+    const context = await createCaptureContext(browser);
+    const logs: string[] = [];
+    const r = await capturePage({
+      context,
+      url: `${server.origin}/csp-strict.html`,
+      viewports,
+      outDir: join(workDir, 'csp-strict'),
+      options,
+      site: DEFAULT_SITE_SETTINGS,
+      log: (m) => logs.push(m),
+    });
+    await context.close();
+    assert.equal(r.shots.length, 2);
+    assert.ok(logs.some((m) => m.includes('CSS を差し込めませんでした')));
   });
 
   test('HTML 以外は撮らない', async () => {

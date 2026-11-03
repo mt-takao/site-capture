@@ -1,10 +1,13 @@
 import type { Page } from 'playwright';
 
-// 設計書 6.1 ③: 隠す要素とアニメーション停止のCSSを差し込む（S-05, S-06）
+// 設計書 6.1 ③: 隠す要素とアニメーション停止のCSSを差し込む（S-05, S-06）。
+// page.addStyleTag は使わない。差し込んだ後にページ側の読み込み完了の合図を待つ作りで、Notion では
+// ページ自身の無関係なエラー（解析用通信の CSP 違反）がその失敗として返ってくることがあったため（2026-11-04）。
+// 差し込めなかった・効かなかった場合は 0.3 秒待って1回だけやり直し、それでもだめなら false を返す（呼び出し側は撮影を続ける）
 export async function injectCaptureStyles(
   page: Page,
   options: { hideSelectors: string[]; disableAnimations: boolean },
-): Promise<void> {
+): Promise<boolean> {
   const rules: string[] = [];
   if (options.hideSelectors.length > 0) {
     rules.push(`${options.hideSelectors.join(',\n')} { visibility: hidden !important; }`);
@@ -16,7 +19,24 @@ export async function injectCaptureStyles(
       caret-color: transparent !important;
     }`);
   }
-  if (rules.length > 0) await page.addStyleTag({ content: rules.join('\n') });
+  if (rules.length === 0) return true;
+  const css = rules.join('\n');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const applied = await page
+      .evaluate((css) => {
+        const style = document.createElement('style');
+        style.setAttribute('data-sc-capture-style', '');
+        style.textContent = css;
+        (document.head ?? document.documentElement).appendChild(style);
+        // ページの CSP でインラインのスタイルが禁止されていると、要素は入っても sheet が作られない
+        return style.sheet != null;
+      }, css)
+      .catch(() => false);
+    if (applied) return true;
+    await page.evaluate(() => document.querySelectorAll('style[data-sc-capture-style]').forEach((el) => el.remove())).catch(() => {});
+    await page.waitForTimeout(300);
+  }
+  return false;
 }
 
 // tsx（esbuild）で実行すると、page.evaluate に渡す関数の中に `__name(...)` という補助呼び出しが入る。

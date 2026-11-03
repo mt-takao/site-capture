@@ -220,9 +220,7 @@ export class CrawlRunner {
             ? `アクセス制限（${e.reason}）${e.summary ? ` ${e.summary}` : ''}`
             : e instanceof PageTimeoutError
               ? `タイムアウト（${e.timeoutMs / 1000}秒）`
-              : e instanceof Error
-                ? e.message.split('\n')[0]!
-                : String(e);
+              : shortenError(e instanceof Error ? e.message.split('\n')[0]! : String(e));
         store.setPageStatus(item.pageId, 'failed', { errorMessage: message });
         this.emit({ type: 'page-failed', pageId: item.pageId, error: message });
       }
@@ -295,4 +293,10 @@ export class CrawlRunner {
     if (e.type === 'warning') this.store.addCrawlWarning(this.crawlId, e.message);
     for (const l of this.listeners) l(e);
   }
+}
+
+// エラーの文面が長すぎると画面が読みにくいので切り詰める（CSP の一覧がそのまま入るなど）
+const MAX_ERROR_LENGTH = 300;
+function shortenError(message: string): string {
+  return message.length > MAX_ERROR_LENGTH ? `${message.slice(0, MAX_ERROR_LENGTH)}…` : message;
 }
