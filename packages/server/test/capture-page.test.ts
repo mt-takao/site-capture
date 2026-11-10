@@ -145,6 +145,40 @@ describe('要素を押してから撮る（J-10）', () => {
     assert.ok(r.shots.every((s) => s.imageHeight > 2400));
   });
 
+  test('文字列で探して押す: 文字列を含む要素を押せる要素まで上にたどり、近くの見出しを名前にする', async () => {
+    const r = await capture('/dialog.html', { ...DEFAULT_SITE_SETTINGS, clickByText: ['View details'] }, 'dialog-text');
+    // 文字が別の要素に分かれていても（View <b>details</b>）見つける
+    assert.deepEqual(
+      r.clickTargets.map((t) => [t.no, t.text, t.index, t.label]),
+      [
+        [1, 'View details', 0, '取り組み1'],
+        [2, 'View details', 1, '取り組み2'],
+        [3, 'View details', 2, 'Sales dashboards'],
+        [4, 'View details', 3, 'Store analytics'],
+      ],
+    );
+    // ダイアログが開かない（その場で開く）場合は、押した後のページ全体を撮る
+    const opened = await capturePageWithClick('/dialog.html', r.clickTargets[1]!, 'dialog-text-2');
+    assert.equal(opened.title, '取り組み2');
+    // 詳細（高さ 1000px）が開いた分、ページが長くなっている
+    for (const [i, s] of opened.shots.entries()) assert.ok(s.imageHeight > r.shots[i]!.imageHeight + 100, `${s.viewportWidth}px`);
+  });
+
+  test('div で作ったモーダルでも、背景の幕と閉じるボタンがダイアログとずれずに写る', async () => {
+    const r = await capturePageWithClick('/dialog.html', { selector: '#open-modal', index: 0, no: 1, label: '下のほうの事例' }, 'dialog-div');
+    assert.equal(r.title, '下のほうの事例の詳細');
+    for (const s of r.shots) {
+      assert.equal(s.method, 'expand');
+      assert.ok(s.imageHeight > 2000, `${s.viewportWidth}px: ${s.imageHeight}`);
+      // 画像の上端と下端まで、背景の幕（暗い色）が掛かっている
+      const { data, info } = await sharp(s.filePath).raw().toBuffer({ resolveWithObject: true });
+      for (const y of [2, info.height - 3]) {
+        const i = (y * info.width + 2) * info.channels;
+        assert.ok(data[i]! < 60, `${s.viewportWidth}px y=${y}: ${data[i]}`);
+      }
+    }
+  });
+
   test('押すと別のページに移動する要素や、見つからない要素は撮らない', async () => {
     await assert.rejects(
       capturePageWithClick('/dialog.html', { selector: '[data-nav]', index: 0, no: 3, label: '別のページへ' }, 'dialog-nav'),
@@ -159,7 +193,7 @@ describe('要素を押してから撮る（J-10）', () => {
 
 async function capturePageWithClick(
   path: string,
-  click: { selector: string; index: number; no: number; label: string },
+  click: { selector?: string; text?: string; index: number; no: number; label: string },
   outName: string,
   site: Partial<SiteSettings> = {},
 ) {

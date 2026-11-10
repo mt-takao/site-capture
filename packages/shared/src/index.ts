@@ -79,6 +79,7 @@ export type SiteSettings = {
   // J-10: 押してから撮る要素（CSS セレクタ）。当てはまる要素を1つずつ押し、開いたダイアログなどを別の画像として撮る。
   // 押すと送信・削除などが起きる要素を選ばないよう、自動では探さず、ここで指定したものだけを押す
   clickSelectors?: string[];
+  clickByText?: string[]; // J-10: 文字列で探して押す要素（例: 'View details'）。その文字列を含むリンク・ボタンを押す
   concurrency?: number; // C-11 の上書き
   intervalMs?: number; // C-11 の上書き
 };

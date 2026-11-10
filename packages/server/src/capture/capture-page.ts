@@ -148,7 +148,7 @@ export async function capturePage(input: CapturePageInput): Promise<CapturePageR
             // 末尾までスクロールして撮り終えた後に集める。スクロールで初めて描画されるリンク（フッターなど）も拾うため
             result.links = await collectLinks(loaded.page);
             result.hasPasswordField = await hasVisiblePasswordField(loaded.page);
-            result.clickTargets = await findClickTargets(loaded.page, site.clickSelectors ?? []);
+            result.clickTargets = await findClickTargets(loaded.page, site.clickSelectors ?? [], site.clickByText ?? []);
           }
         }
         return shot;
@@ -271,6 +271,8 @@ async function shootViewport(
         if (refit > height && refit <= TILE_THRESHOLD_PX) await page.setViewportSize({ width: vp.width, height: refit });
         height = refit;
       }
+      // ページ側がスクロール位置を戻すことがあるので、撮る直前に先頭へ戻す
+      await page.evaluate(() => window.scrollTo(0, 0));
       shot = { ...(await shootDocument(page, filePath, height)), method: 'expand' };
       if (resize) await page.setViewportSize(vp);
     } else {

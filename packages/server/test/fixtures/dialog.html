@@ -5,7 +5,7 @@
 <title>ダイアログのあるページ</title>
 <style>
   body { margin: 0; font-family: sans-serif; }
-  main { padding: 24px; height: 1400px; }
+  main { padding: 24px; min-height: 1400px; }
   .card { display: block; margin: 16px 0; padding: 24px; border: 1px solid #ccc; background: #fff; }
   dialog { width: 600px; max-height: calc(100vh - 80px); padding: 0; border: 0; overflow: auto; }
   dialog::backdrop { background: rgba(0, 0, 0, .5); }
@@ -22,7 +22,27 @@
   <button class="card" data-case="hidden" style="display:none"><h3>非表示の事例</h3></button>
   <!-- 押すと別のページに移動するボタン（押して撮る対象を誤って指定した場合の確認用） -->
   <button class="card" data-nav>別のページへ</button>
+  <!-- 「View details」を押すと、その場で詳細が開く行（文字列で探して押す場合の確認用。ダイアログは開かない） -->
+  <section class="works">
+    <div class="work"><h3>取り組み1</h3><span class="more" tabindex="0">View details ↗</span><div class="detail" hidden style="height:1000px">取り組み1の詳細</div></div>
+    <div class="work"><h3>取り組み2</h3><span class="more" tabindex="0">View <b>details</b> ↗</span><div class="detail" hidden style="height:1000px">取り組み2の詳細</div></div>
+    <!-- 見出しのない行。行の文字列から名前を作る（英字の s が消えないことも確かめる） -->
+    <div class="work"><div><span>03</span> <span style="font-size:24px">Sales dashboards</span><p>説明の文</p></div><span class="more" tabindex="0">View details ↗</span><div class="detail" hidden style="height:1000px">詳細</div></div>
+  </section>
+  <!-- 行全体が押せるボタンで、見出しのない行（実際のポートフォリオサイトと同じ作り） -->
+  <section class="works">
+    <button class="row"><span>04</span><span style="font-size:24px">Store analytics</span><span>説明の文</span><span>View details ↗</span></button>
+  </section>
+  <!-- ページの下のほう（押すにはスクロールが要る）にある、div で作ったモーダルを開くボタン -->
+  <div style="height:1600px"></div>
+  <button class="card" id="open-modal"><h3>下のほうの事例</h3></button>
 </main>
+<!-- div で作ったモーダル: 背景の幕と閉じるボタンは、ダイアログの外にある固定の要素 -->
+<div id="overlay" hidden style="position:fixed;inset:0;background:rgb(20,20,20)"></div>
+<button id="modal-close" hidden style="position:fixed;top:30px;right:30px">閉じる</button>
+<div id="modal" role="dialog" aria-label="下のほうの事例の詳細" hidden style="position:fixed;top:40px;left:50%;transform:translateX(-50%);width:500px;max-height:calc(100vh - 80px);overflow:auto;background:#fff">
+  <div style="height:2000px;padding:16px">モーダルの中身</div>
+</div>
 <dialog id="case-dialog" aria-labelledby="case-title">
   <div class="case-body" id="case-content"></div>
 </dialog>
@@ -44,6 +64,15 @@
       return;
     }
     if (e.target.closest('[data-nav]')) location.href = '/long-static.html';
+    if (e.target.closest('#open-modal')) {
+      // 開いたときのスクロール位置を覚え、画面の大きさが変わると戻す（スクロールを止める仕組みによくある動き）
+      const saved = window.scrollY;
+      for (const id of ['overlay', 'modal-close', 'modal']) document.getElementById(id).hidden = false;
+      window.addEventListener('resize', () => window.scrollTo(0, saved));
+      return;
+    }
+    const more = e.target.closest('.more');
+    if (more) more.parentElement.querySelector('.detail').hidden = false;
   });
 </script>
 </body>

@@ -18,6 +18,7 @@ type Draft = {
   expandTogglesScript: string;
   reloadPerViewport: boolean;
   clickSelectors: string;
+  clickByText: string;
   concurrency: string;
   intervalMs: string;
 };
@@ -37,6 +38,7 @@ function toDraft(s: SiteSettings, id: string | null): Draft {
     expandTogglesScript: s.expandTogglesScript ?? '',
     reloadPerViewport: s.reloadPerViewport,
     clickSelectors: (s.clickSelectors ?? []).join('\n'),
+    clickByText: (s.clickByText ?? []).join('\n'),
     concurrency: s.concurrency == null ? '' : String(s.concurrency),
     intervalMs: s.intervalMs == null ? '' : String(s.intervalMs),
   };
@@ -54,6 +56,7 @@ function fromDraft(d: Draft): SiteSettings {
     expandTogglesScript: d.expandTogglesScript || undefined,
     reloadPerViewport: d.reloadPerViewport,
     clickSelectors: lines(d.clickSelectors),
+    clickByText: lines(d.clickByText),
     concurrency: d.concurrency === '' ? undefined : Number(d.concurrency),
     intervalMs: d.intervalMs === '' ? undefined : Number(d.intervalMs),
   };
@@ -161,6 +164,13 @@ export function SiteSettingsSection() {
               <input className="input" type="number" min={0} step={1000} value={draft.intervalMs} onChange={(e) => set('intervalMs', e.target.value)} />
             </label>
           </div>
+          <label className={styles.field}>
+            文字列で探して押す要素（1行に1つ）
+            <textarea className="input" rows={2} value={draft.clickByText} onChange={(e) => set('clickByText', e.target.value)} placeholder={'View details\n詳しく見る'} />
+            <span className={styles.note}>
+              その文字列を含むリンク・ボタンを1つずつ押し、開いた画面を元のページとは別の画像として撮ります。サイトの作りを調べなくても指定できます
+            </span>
+          </label>
           <label className={styles.field}>
             押してから撮る要素（CSS セレクタ、1行に1つ）
             <textarea className="input mono" rows={2} value={draft.clickSelectors} onChange={(e) => set('clickSelectors', e.target.value)} placeholder={'[data-case]\nbutton[aria-haspopup="dialog"]'} />
