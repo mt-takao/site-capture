@@ -102,3 +102,9 @@
     display: none;
   }
 }
+.warning {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--warning-soft);
+  color: var(--warning);
+}

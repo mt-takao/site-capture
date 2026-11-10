@@ -18,6 +18,7 @@ export function SettingsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [emptyWarning, setEmptyWarning] = useState<string | null>(null);
 
   const load = () => api.listAuthProfiles().then(setProfiles).catch((e: Error) => setError(e.message));
   useEffect(() => {
@@ -51,6 +52,7 @@ export function SettingsPage() {
     setBusy(true);
     setError(null);
     setNotice(null);
+    setEmptyWarning(null);
     try {
       setSession(await api.openLoginSession(name, url));
     } catch (err) {
@@ -66,7 +68,20 @@ export function SettingsPage() {
     setError(null);
     try {
       const profile = await api.saveLoginSession(session.id);
-      setNotice(`「${profile.name}」のログイン状態を保存しました。撮影開始の画面で選べます。`);
+      const { cookies, localStorage, sessionStorage } = profile.savedItems;
+      if (cookies + localStorage + sessionStorage === 0) {
+        // 何も保存できていなければ、撮影してもログイン後の画面は写らない
+        setNotice(null);
+        setEmptyWarning(
+          `「${profile.name}」を保存しましたが、ログイン後の状態（Cookie・localStorage・sessionStorage）が何も見つかりませんでした。` +
+            'ログインが済む前に保存した可能性があります。開いたブラウザでログインが済んだことを確かめてから、作り直してください。',
+        );
+      } else {
+        setEmptyWarning(null);
+        setNotice(
+          `「${profile.name}」のログイン状態を保存しました（Cookie ${cookies}件・localStorage ${localStorage}件・sessionStorage ${sessionStorage}件）。撮影開始の画面で選べます。`,
+        );
+      }
       setSession(null);
       setNameEdited(false);
       setUrl('');
@@ -159,6 +174,11 @@ export function SettingsPage() {
 
         {error && <div className={styles.error}>{error}</div>}
         {notice && <div className={styles.notice}>{notice}</div>}
+        {emptyWarning && (
+          <div className={styles.warning} role="alert">
+            {emptyWarning}
+          </div>
+        )}
 
         {profiles && profiles.length === 0 && <p className={styles.empty}>保存したログイン状態はありません</p>}
         {profiles && profiles.length > 0 && (

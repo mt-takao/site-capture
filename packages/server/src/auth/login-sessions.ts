@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, rm } from 'node:fs/promises';
+import { chmod, mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Browser, BrowserContext } from 'playwright';
-import type { AuthProfileItem, LoginSessionInfo } from '@site-capture/shared';
+import type { AuthProfileItem, LoginSessionInfo, SavedAuthProfile } from '@site-capture/shared';
 import type { AuthProfileRow, Store } from '../db/store.js';
 import { authDir } from '../paths.js';
+import { collectSessionStorage, countSavedItems, type SavedLoginState } from './saved-state.js';
 
 // 設計書 7.1「ログイン状態の保存」（L-01〜L-03）。
 // 画面ありのブラウザを開いて利用者に手でログインしてもらい、ログイン後の Cookie と localStorage だけを保存する。
@@ -52,8 +53,8 @@ export class LoginSessionManager {
     return this.sessions.get(id)?.context;
   }
 
-  // ログイン状態を保存してブラウザを閉じる
-  async save(id: string): Promise<AuthProfileItem> {
+  // ログイン状態を保存してブラウザを閉じる。保存した件数も返す（どれも 0 件なら、画面で知らせる）
+  async save(id: string): Promise<SavedAuthProfile> {
     const s = this.sessions.get(id);
     if (!s) throw new LoginSessionError('ログイン用ブラウザが見つかりません');
     if (s.info.status === 'closed') {
@@ -65,11 +66,12 @@ export class LoginSessionManager {
     await chmod(dir, 0o700);
     const profileId = randomUUID();
     const path = join(dir, `${profileId}.json`);
-    await s.context.storageState({ path });
+    const state: SavedLoginState = { ...(await s.context.storageState()), sessionStorage: await collectSessionStorage(s.context) };
+    await writeFile(path, JSON.stringify(state), { mode: 0o600 });
     await chmod(path, 0o600);
     this.store.createAuthProfile({ id: profileId, name: s.info.name, origin: new URL(s.info.url).origin, storageStatePath: path });
     await this.close(id);
-    return authProfileItem(this.store.getAuthProfile(profileId)!);
+    return { ...authProfileItem(this.store.getAuthProfile(profileId)!), savedItems: countSavedItems(state) };
   }
 
   async close(id: string): Promise<void> {

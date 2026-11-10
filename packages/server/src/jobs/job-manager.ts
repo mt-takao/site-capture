@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import type { Browser, BrowserContextOptions } from 'playwright';
+import { readSavedLoginState, type SessionStorageByOrigin } from '../auth/saved-state.js';
 import type { CrawlEvent, CrawlSettings } from '@site-capture/shared';
 import type { Store } from '../db/store.js';
 import { captureDir } from '../paths.js';
@@ -26,10 +27,17 @@ export class JobManager {
     settings: CrawlSettings,
     secrets: { basicAuth?: { username: string; password: string } | null } = {},
   ): Promise<{ crawlId: number; finished: Promise<void> }> {
-    const contextOptions = this.contextOptionsFor(settings, secrets.basicAuth ?? null);
+    const { contextOptions, sessionStorage } = await this.contextOptionsFor(settings, secrets.basicAuth ?? null);
     this.browser ??= this.launchBrowser();
     const browser = await this.browser;
-    const runner = new CrawlRunner({ store: this.store, browser, settings, outputDir: this.outputDirFor(settings), contextOptions });
+    const runner = new CrawlRunner({
+      store: this.store,
+      browser,
+      settings,
+      outputDir: this.outputDirFor(settings),
+      contextOptions,
+      sessionStorage,
+    });
     if (settings.authProfileId) this.store.touchAuthProfile(settings.authProfileId);
     return this.launch(runner);
   }
@@ -45,11 +53,11 @@ export class JobManager {
     if (!row) throw new StartCrawlError('撮影セッションが見つかりません');
     if (this.store.countRetryable(crawlId) === 0) throw new StartCrawlError('撮り直すページがありません');
     const settings = JSON.parse(row.settings_json) as CrawlSettings;
-    const contextOptions = this.contextOptionsFor(settings, secrets.basicAuth ?? null);
+    const { contextOptions, sessionStorage } = await this.contextOptionsFor(settings, secrets.basicAuth ?? null);
     this.browser ??= this.launchBrowser();
     const browser = await this.browser;
     this.store.prepareRetry(crawlId);
-    const runner = new CrawlRunner({ store: this.store, browser, resumeCrawlId: crawlId, contextOptions });
+    const runner = new CrawlRunner({ store: this.store, browser, resumeCrawlId: crawlId, contextOptions, sessionStorage });
     if (settings.authProfileId) this.store.touchAuthProfile(settings.authProfileId);
     return this.launch(runner);
   }
@@ -69,23 +77,27 @@ export class JobManager {
   }
 
   // ログイン状態（L-01）と Basic 認証（L-04）をブラウザコンテキストの設定にする
-  private contextOptionsFor(
+  private async contextOptionsFor(
     settings: CrawlSettings,
     basicAuth: { username: string; password: string } | null,
-  ): BrowserContextOptions {
+  ): Promise<{ contextOptions: BrowserContextOptions; sessionStorage: SessionStorageByOrigin }> {
     const options: BrowserContextOptions = {};
+    let sessionStorage: SessionStorageByOrigin = {};
     if (settings.authProfileId) {
       const profile = this.store.getAuthProfile(settings.authProfileId);
       if (!profile || !existsSync(profile.storage_state_path)) {
         throw new StartCrawlError('選んだログイン状態が見つかりません。設定画面で作り直してください');
       }
-      options.storageState = profile.storage_state_path;
+      // ファイルには sessionStorage も入っているので、Playwright には Cookie と localStorage の分だけを渡す
+      const saved = await readSavedLoginState(profile.storage_state_path);
+      options.storageState = saved.storageState;
+      sessionStorage = saved.sessionStorage;
     }
     if (basicAuth && basicAuth.username) {
       // ID とパスワードは起点URLと同じオリジンにだけ送る。外部サイトへの通信に送らないため
       options.httpCredentials = { ...basicAuth, origin: new URL(settings.startUrl).origin };
     }
-    return options;
+    return { contextOptions: options, sessionStorage };
   }
 
   isRunning(id: number): boolean {

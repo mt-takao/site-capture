@@ -195,6 +195,11 @@ export type AuthProfileItem = {
   lastUsedAt: string | null;
 };
 
+// 保存したときに返す。Cookie・localStorage・sessionStorage がどれも 0 件なら、ログイン後の状態を保存できていない可能性がある
+export type SavedAuthProfile = AuthProfileItem & {
+  savedItems: { cookies: number; localStorage: number; sessionStorage: number };
+};
+
 // ログイン用ブラウザ。open: 開いている、closed: 利用者がウィンドウを閉じた
 export type LoginSessionInfo = {
   id: string;

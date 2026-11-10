@@ -25,6 +25,7 @@ export type CapturePageResult = {
   httpStatus: number | null;
   title: string;
   links: string[]; // いちばん広い画面幅で集めたリンク（絶対URL、未正規化）
+  hasPasswordField: boolean; // 見えているパスワードの入力欄があるか（ログイン画面が写っていないかの判定に使う）
   shots: ShotRecord[];
 };
 

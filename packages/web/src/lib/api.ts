@@ -7,6 +7,7 @@ import type {
   CrawlSummary,
   LoginSessionInfo,
   PageItem,
+  SavedAuthProfile,
   SiteSettings,
   SiteSettingsItem,
   StartCrawlRequest,
@@ -49,7 +50,7 @@ export const api = {
   openLoginSession: (name: string, url: string) =>
     request<LoginSessionInfo>('/api/auth-profiles/sessions', { method: 'POST', body: JSON.stringify({ name, url }) }),
   getLoginSession: (id: string) => request<LoginSessionInfo>(`/api/auth-profiles/sessions/${id}`),
-  saveLoginSession: (id: string) => request<AuthProfileItem>(`/api/auth-profiles/sessions/${id}/save`, { method: 'POST' }),
+  saveLoginSession: (id: string) => request<SavedAuthProfile>(`/api/auth-profiles/sessions/${id}/save`, { method: 'POST' }),
   cancelLoginSession: (id: string) => request<{ ok: true }>(`/api/auth-profiles/sessions/${id}`, { method: 'DELETE' }),
 };
 

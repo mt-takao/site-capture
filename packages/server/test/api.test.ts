@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { chromium } from 'playwright';
-import type { AuthProfileItem, CompareResult, SiteSettingsItem, CrawlDetail, CrawlEvent, CrawlSummary, LoginSessionInfo, PageItem, StreamMessage } from '@site-capture/shared';
+import type { AuthProfileItem, CompareResult, SavedAuthProfile, SiteSettingsItem, CrawlDetail, CrawlEvent, CrawlSummary, LoginSessionInfo, PageItem, StreamMessage } from '@site-capture/shared';
 import { LoginSessionManager } from '../src/auth/login-sessions.js';
 import { buildServer } from '../src/api/server.js';
 import { Store } from '../src/db/store.js';
@@ -417,4 +417,50 @@ test('サイト設定を作って編集・削除でき、組み込みより優�
   assert.equal((await api('/api/site-settings/builtin:notion', { method: 'DELETE' })).status, 400);
   assert.equal((await api(`/api/site-settings/${created.body.id}`, { method: 'DELETE' })).status, 200);
   assert.equal((await api(`/api/site-settings/${created.body.id}`, { method: 'DELETE' })).status, 404);
+});
+
+// ---- sessionStorage に入室状態を置くサイト（2026-11-10） ----
+
+async function openLogin(path: string, name: string): Promise<LoginSessionInfo> {
+  const opened = await api<LoginSessionInfo>('/api/auth-profiles/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ name, url: `${site.origin}${path}` }),
+  });
+  assert.equal(opened.status, 201);
+  return opened.body;
+}
+
+test('sessionStorage に置かれた入室状態も保存し、撮影のときに書き戻す', async () => {
+  const opened = await openLogin('/session-gated', 'セッションで入室');
+  // 利用者がパスワードを入れて入室した結果を、sessionStorage に印を書いて再現する
+  const page = logins.contextOf(opened.id)!.pages()[0]!;
+  await page.evaluate(() => sessionStorage.setItem('unlocked', 'true'));
+
+  const saved = await api<SavedAuthProfile>(`/api/auth-profiles/sessions/${opened.id}/save`, { method: 'POST' });
+  assert.equal(saved.status, 201);
+  assert.deepEqual(saved.body.savedItems, { cookies: 0, localStorage: 0, sessionStorage: 1 });
+  const row = store.getAuthProfile(saved.body.id)!;
+  assert.equal((await stat(row.storage_state_path)).mode & 0o777, 0o600);
+  assert.match(await readFile(row.storage_state_path, 'utf8'), /"sessionStorage":\{"http:\/\/127\.0\.0\.1:\d+":\[\["unlocked","true"\]\]\}/);
+
+  const r = await crawlAndWait(fastSettings({ startUrl: `${site.origin}/session-gated`, authProfileId: saved.body.id, maxPages: 1 }));
+  assert.equal(r.pages[0]!.title, '会員だけのページ');
+  assert.deepEqual(r.detail.warnings, []);
+  await api(`/api/auth-profiles/${saved.body.id}`, { method: 'DELETE' });
+});
+
+test('入室せずに保存すると、保存した件数がすべて 0 件になる', async () => {
+  const opened = await openLogin('/session-gated', '入室前に保存');
+  const saved = await api<SavedAuthProfile>(`/api/auth-profiles/sessions/${opened.id}/save`, { method: 'POST' });
+  assert.deepEqual(saved.body.savedItems, { cookies: 0, localStorage: 0, sessionStorage: 0 });
+  await api(`/api/auth-profiles/${saved.body.id}`, { method: 'DELETE' });
+});
+
+test('転送されず同じ URL のままパスワードの入力画面が写ったら警告する', async () => {
+  const r = await crawlAndWait(fastSettings({ startUrl: `${site.origin}/session-gated`, maxPages: 1 }));
+  assert.equal(r.pages[0]!.title, 'パスワード入力');
+  assert.ok(r.detail.warnings.some((w) => w.includes('パスワードの入力欄')));
+  // パスワードの入力欄がないページでは警告しない
+  const plain = await crawlAndWait(fastSettings({ maxPages: 1 }));
+  assert.ok(!plain.detail.warnings.some((w) => w.includes('パスワードの入力欄')));
 });

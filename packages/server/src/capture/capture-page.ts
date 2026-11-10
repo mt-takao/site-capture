@@ -1,6 +1,7 @@
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, BrowserContextOptions, Page } from 'playwright';
+import { sessionStorageInitScript, type SessionStorageByOrigin } from '../auth/saved-state.js';
 import { BlockedError, classifyRateLimited, detectBlocked, waitForRecovery } from './blocked.js';
 import { shotFileName } from './naming.js';
 import {
@@ -33,12 +34,20 @@ export class PageTimeoutError extends Error {
   }
 }
 
-// 撮影セッション単位のブラウザコンテキストを作る。ログイン状態や Basic 認証は options で渡す
-export async function createCaptureContext(browser: Browser, options: BrowserContextOptions = {}): Promise<BrowserContext> {
+// 撮影セッション単位のブラウザコンテキストを作る。ログイン状態や Basic 認証は options で渡す。
+// sessionStorage（保存したログイン状態の一部）は、ページのスクリプトより先に書き戻す
+export async function createCaptureContext(
+  browser: Browser,
+  options: BrowserContextOptions = {},
+  extra: { sessionStorage?: SessionStorageByOrigin } = {},
+): Promise<BrowserContext> {
   const context = await browser.newContext({ deviceScaleFactor: 1, locale: 'ja-JP', ...options });
   await context.addInitScript(TSX_COMPAT_INIT_SCRIPT);
   await context.addInitScript(DOM_OBSERVER_INIT_SCRIPT);
   await context.addInitScript(HISTORY_HOOK_INIT_SCRIPT);
+  if (extra.sessionStorage && Object.keys(extra.sessionStorage).length > 0) {
+    await context.addInitScript(sessionStorageInitScript(extra.sessionStorage));
+  }
   return context;
 }
 
@@ -73,7 +82,7 @@ export async function capturePage(input: CapturePageInput): Promise<CapturePageR
   const viewports = [...input.viewports].sort((a, b) => b.width - a.width);
   await mkdir(join(input.outDir, '.thumbs'), { recursive: true });
 
-  const result: CapturePageResult = { url, finalUrl: url, httpStatus: null, title: '', links: [], shots: [] };
+  const result: CapturePageResult = { url, finalUrl: url, httpStatus: null, title: '', links: [], hasPasswordField: false, shots: [] };
   let loaded: LoadedPage | null = null;
   const report = (l: LoadedPage | null) => {
     const responses = l?.network.rateLimitedResponses() ?? [];
@@ -106,6 +115,7 @@ export async function capturePage(input: CapturePageInput): Promise<CapturePageR
           result.title = await loaded.page.title();
           // 末尾までスクロールして撮り終えた後に集める。スクロールで初めて描画されるリンク（フッターなど）も拾うため
           result.links = await collectLinks(loaded.page);
+          result.hasPasswordField = await hasVisiblePasswordField(loaded.page);
         }
         return shot;
       });
@@ -237,6 +247,18 @@ async function shootViewport(
     fellBackToStitch: fellBack,
     waitTimedOut: loaded.waitTimedOut || settled.timedOut,
   };
+}
+
+// 見えているパスワードの入力欄があるか。同じ URL のままログイン画面を出すサイト（転送しない）でも気づけるようにする
+async function hasVisiblePasswordField(page: Page): Promise<boolean> {
+  return page
+    .evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLInputElement>('input[type="password"]')).some((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+      }),
+    )
+    .catch(() => false);
 }
 
 async function withTimeout<T>(ms: number, fn: () => Promise<T>): Promise<T> {

@@ -4,6 +4,7 @@ import { capturePage, createCaptureContext, NotHtmlError, PageTimeoutError } fro
 import { HostGate, withRateLimitRetry } from '../capture/host-gate.js';
 import { formatRateLimitReport } from '../capture/rate-limit-log.js';
 import type { SiteSettingsItem } from '@site-capture/shared';
+import type { SessionStorageByOrigin } from '../auth/saved-state.js';
 import { viewportForWidth } from '../capture/types.js';
 import { contextFetchText } from '../crawler/fetch-text.js';
 import { normalizeUrl } from '../crawler/normalize.js';
@@ -25,6 +26,7 @@ export type CrawlRunnerInput = {
   store: Store;
   browser: Browser;
   contextOptions?: BrowserContextOptions; // ログイン状態・Basic 認証（M4）
+  sessionStorage?: SessionStorageByOrigin; // 保存したログイン状態のうち sessionStorage の分
 } & (
   | { settings: CrawlSettings; outputDir: string } // 新しく撮る
   | { resumeCrawlId: number } // S-08: 既存の撮影セッションの撮影待ちのページを撮り直す
@@ -93,7 +95,7 @@ export class CrawlRunner {
     let status: CrawlStatus = 'done';
     let errorMessage: string | null = null;
     try {
-      context = await createCaptureContext(this.input.browser, this.input.contextOptions);
+      context = await createCaptureContext(this.input.browser, this.input.contextOptions, { sessionStorage: this.input.sessionStorage });
       const fetchText = contextFetchText(context);
       this.robots = await loadRobots(settings.startUrl, fetchText);
 
@@ -202,7 +204,7 @@ export class CrawlRunner {
       for (const s of result.shots) this.emit({ type: 'shot-done', pageId: item.pageId, width: s.viewportWidth, thumbPath: s.thumbPath });
       this.emit({ type: 'page-done', pageId: item.pageId, waitTimedOut: result.shots.some((s) => s.waitTimedOut) });
 
-      if (item.depth === 0) this.warnIfLoginRedirect(item.url, result.finalUrl);
+      if (item.depth === 0) this.warnIfLoginScreen(item.url, result.finalUrl, result.hasPasswordField);
 
       // 転送された先が範囲外（外部サイト）なら、そのページのリンクはたどらない
       const finalHost = new URL(result.finalUrl).hostname;
@@ -271,12 +273,17 @@ export class CrawlRunner {
     this.queue.push({ pageId, url: url.href, depth });
   }
 
-  // 設計書 7.1: 起点ページがログイン画面に転送されたら、ログインが切れている可能性を知らせる
-  private warnIfLoginRedirect(url: string, finalUrl: string): void {
+  // 設計書 7.1: 起点ページにログイン画面が写っていそうなら、ログインが切れている（または保存できていない）可能性を知らせる。
+  // ログイン画面に転送された場合と、転送されずに同じ URL のままパスワードの入力欄が出ている場合の2つを見る
+  private warnIfLoginScreen(url: string, finalUrl: string, hasPasswordField: boolean): void {
+    const hint = this.settings.authProfileId
+      ? 'ログイン状態が切れているか、保存できていない可能性があります。設定画面で作り直してください'
+      : 'ログインが必要なサイトの場合は、ログイン状態を選んで撮影してください';
     const looksLikeLogin = (u: string) => /(log-?in|sign-?in|auth)/i.test(new URL(u).pathname);
     if (finalUrl !== url && looksLikeLogin(finalUrl) && !looksLikeLogin(url)) {
-      const hint = this.settings.authProfileId ? 'ログイン状態が切れている可能性があります。設定画面で作り直してください' : 'ログインが必要なサイトの場合は、ログイン状態を選んで撮影してください';
       this.emit({ type: 'warning', message: `起点のページがログイン画面（${finalUrl}）に転送されました。${hint}` });
+    } else if (hasPasswordField) {
+      this.emit({ type: 'warning', message: `起点のページにパスワードの入力欄があり、ログイン画面が写っている可能性があります（${finalUrl}）。${hint}` });
     }
   }
 

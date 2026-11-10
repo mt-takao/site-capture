@@ -11,6 +11,7 @@ import { createServer } from 'node:http';
 //   /members           Cookie（session=ok）がないと /login に転送される会員ページ
 //   /basic             Basic 認証（user / pass）が必要なページ
 //   /flaky             最初の1回だけ応答に5秒かかる（撮り直しの確認用）
+//   /session-gated     転送せず同じ URL のまま、sessionStorage に入室の印がなければパスワードの入力画面を出す
 // variant 'b' は「リニューアル後」の版。比較画面の確認に使う。
 //   トップの見出しと帯が変わり、/contact へのリンクがなくなり、/news が増える
 
@@ -76,6 +77,22 @@ export async function startSiteServer(port = 0, variant: 'a' | 'b' = 'a'): Promi
         return void res.end(page('認証が必要です', []));
       }
       return html(200, page('Basic認証のページ', []));
+    }
+    if (p === '/session-gated') {
+      return html(
+        200,
+        `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>読み込み中</title></head><body><div id="root"></div>
+<script>
+  const root = document.getElementById('root');
+  if (sessionStorage.getItem('unlocked') === 'true') {
+    document.title = '会員だけのページ';
+    root.innerHTML = '<h1>会員だけのページ</h1><main style="height:800px"></main>';
+  } else {
+    document.title = 'パスワード入力';
+    root.innerHTML = '<h1>このページはパスワードで保護されています</h1><form><input type="password" placeholder="パスワードを入力"><button>入室</button></form>';
+  }
+</script></body></html>`,
+      );
     }
     if (p === '/flaky') {
       const delay = flakyCount++ === 0 ? 5000 : 0;
