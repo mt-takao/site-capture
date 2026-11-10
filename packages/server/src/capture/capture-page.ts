@@ -3,6 +3,16 @@ import { join } from 'node:path';
 import type { Browser, BrowserContext, BrowserContextOptions, Page } from 'playwright';
 import { sessionStorageInitScript, type SessionStorageByOrigin } from '../auth/saved-state.js';
 import { BlockedError, classifyRateLimited, detectBlocked, waitForRecovery } from './blocked.js';
+import {
+  DIALOG_SCROLLER_ATTR,
+  expandFixedDialog,
+  findClickTargets,
+  fitDialogSpacer,
+  findOpenDialog,
+  openClickTarget,
+  undoExpandFixedDialog,
+  type OpenedDialog,
+} from './click.js';
 import { shotFileName } from './naming.js';
 import {
   collectLinks,
@@ -13,10 +23,10 @@ import {
   TSX_COMPAT_INIT_SCRIPT,
 } from './prepare.js';
 import { findScrollTarget, scrollThrough } from './scroll.js';
-import { shootDocument, shootExpanded, shootStitched, undoShootModifications, type ShotResult } from './shoot.js';
+import { shootDocument, shootExpanded, shootStitched, TILE_THRESHOLD_PX, undoShootModifications, type ShotResult } from './shoot.js';
 import { DOM_OBSERVER_INIT_SCRIPT, NetworkTracker, waitForStable, type RateLimitedResponse } from './stabilize.js';
 import { makeThumbnail } from './thumbnail.js';
-import type { CaptureOptions, CapturePageResult, ShotRecord, SiteSettings, Viewport } from './types.js';
+import type { CaptureOptions, CapturePageResult, ClickTarget, ShotRecord, SiteSettings, Viewport } from './types.js';
 
 // 設計書 6.1「1ページを撮る手順」
 
@@ -58,6 +68,8 @@ export type CapturePageInput = {
   outDir: string; // 画像の保存先。サムネイルは outDir/.thumbs
   options: CaptureOptions;
   site: SiteSettings;
+  // J-10: 指定すると、ページを開いた後にこの要素を押し、開いたダイアログ（なければ押した後のページ）を撮る
+  click?: ClickTarget;
   log?: (message: string) => void;
   // 429 を返した通信があったときに、読み込んだページごとに全件を渡す（原因の調査用。ほかのサイトの 429 も含む）
   onRateLimited?: (report: RateLimitReport) => void;
@@ -73,16 +85,23 @@ export type RateLimitReport = {
 // ページ側の再送で 429 が回復するのを待つ時間の上限
 const RECOVERY_WAIT_MAX_MS = 10000;
 
-type LoadedPage = { page: Page; network: NetworkTracker; status: number | null; waitTimedOut: boolean; viewportWidth: number };
+type LoadedPage = {
+  page: Page;
+  network: NetworkTracker;
+  status: number | null;
+  waitTimedOut: boolean;
+  viewportWidth: number;
+  dialog: OpenedDialog | null; // 要素を押して開いたダイアログ
+};
 
 export async function capturePage(input: CapturePageInput): Promise<CapturePageResult> {
-  const { context, url, site, options } = input;
+  const { context, url, site, options, click } = input;
   const log = input.log ?? (() => {});
   // リンクはいちばん広い画面幅で集めるので、広い順に撮る（設計書 5.1）
   const viewports = [...input.viewports].sort((a, b) => b.width - a.width);
   await mkdir(join(input.outDir, '.thumbs'), { recursive: true });
 
-  const result: CapturePageResult = { url, finalUrl: url, httpStatus: null, title: '', links: [], hasPasswordField: false, shots: [] };
+  const result: CapturePageResult = { url, finalUrl: url, httpStatus: null, title: '', links: [], hasPasswordField: false, clickTargets: [], shots: [] };
   let loaded: LoadedPage | null = null;
   const report = (l: LoadedPage | null) => {
     const responses = l?.network.rateLimitedResponses() ?? [];
@@ -100,22 +119,37 @@ export async function capturePage(input: CapturePageInput): Promise<CapturePageR
             await loaded.page.close();
           }
           loaded = await loadPage(context, url, vp, site, options, log, opened);
+          if (click) {
+            loaded.dialog = await openClickTarget(loaded.page, click);
+            if (!loaded.dialog) log(`要素を押してもダイアログが見つからなかったため、押した後のページ全体を撮ります: ${click.label}（${url}）`);
+            const stable = await waitForStable(loaded.page, loaded.network, options);
+            loaded.waitTimedOut ||= stable.timedOut;
+          }
         } else {
           // 1回の読み込みで画面幅を切り替えながら撮る（アクセス制限の厳しいサイト向け）
           await undoShootModifications(loaded.page);
+          if (click) await undoExpandFixedDialog(loaded.page);
           await loaded.page.setViewportSize(vp);
           const stable = await waitForStable(loaded.page, loaded.network, options);
           loaded.waitTimedOut = stable.timedOut;
           loaded.viewportWidth = vp.width;
+          // 画面幅が変わるとダイアログの大きさも変わるので、スクロールする要素を探し直す
+          if (click && loaded.dialog) loaded.dialog = await findOpenDialog(loaded.page);
         }
-        const shot = await shootViewport(loaded, url, vp, input.outDir, site, options, log);
+        const shot = await shootViewport(loaded, url, vp, input.outDir, site, options, log, click?.no);
         if (i === 0) {
           result.httpStatus = loaded.status;
           result.finalUrl = loaded.page.url();
-          result.title = await loaded.page.title();
-          // 末尾までスクロールして撮り終えた後に集める。スクロールで初めて描画されるリンク（フッターなど）も拾うため
-          result.links = await collectLinks(loaded.page);
-          result.hasPasswordField = await hasVisiblePasswordField(loaded.page);
+          if (click) {
+            // 押して撮ったページは、ダイアログの名前（なければ押した要素の名前）を題名にする。リンクはたどらない
+            result.title = loaded.dialog?.title || click.label;
+          } else {
+            result.title = await loaded.page.title();
+            // 末尾までスクロールして撮り終えた後に集める。スクロールで初めて描画されるリンク（フッターなど）も拾うため
+            result.links = await collectLinks(loaded.page);
+            result.hasPasswordField = await hasVisiblePasswordField(loaded.page);
+            result.clickTargets = await findClickTargets(loaded.page, site.clickSelectors ?? []);
+          }
         }
         return shot;
       });
@@ -181,7 +215,7 @@ async function loadPage(
   for (const script of scripts) await runPageScript(page, script);
   if (scripts.length > 0) stable = await waitForStable(page, network, options);
 
-  return { page, network, status, waitTimedOut: stable.timedOut, viewportWidth: vp.width };
+  return { page, network, status, waitTimedOut: stable.timedOut, viewportWidth: vp.width, dialog: null };
 }
 
 // ⑦〜⑩: スクロール領域を見つけ、末尾まで描画させてから撮る
@@ -193,11 +227,18 @@ async function shootViewport(
   site: SiteSettings,
   options: CaptureOptions,
   log: (message: string) => void,
+  clickNo?: number,
 ): Promise<ShotRecord> {
-  const { page, network } = loaded;
+  const { page, network, dialog } = loaded;
   await hideByText(page, site.hideByText);
-  const target = await findScrollTarget(page, site.scrollContainerSelector);
-  await scrollThrough(page, target);
+  // 画面に固定されたダイアログは、ページではなくダイアログの中をスクロールして撮る（設計書 6.6）
+  const fixedDialog = dialog?.fixed ? dialog : null;
+  const target = fixedDialog
+    ? fixedDialog.scrollable
+      ? await findScrollTarget(page, `[${DIALOG_SCROLLER_ATTR}]`)
+      : null
+    : await findScrollTarget(page, site.scrollContainerSelector);
+  if (target) await scrollThrough(page, target);
   const settled = await waitForStable(page, network, { ...options, quietWindowMs: Math.min(500, options.quietWindowMs) });
   // スクロールで新しく描画された要素にも隠す処理をかける
   await hideByText(page, site.hideByText);
@@ -208,10 +249,37 @@ async function shootViewport(
   const blocked = await detectBlocked(page, loaded.status, network, { includePartial: true });
   if (blocked) throw blocked;
 
-  const filePath = join(outDir, shotFileName(url, vp.width));
+  const fileName = shotFileName(url, vp.width, clickNo);
+  const filePath = join(outDir, fileName);
   let shot: ShotResult;
   let fellBack = false;
-  if (target.kind === 'document') {
+  if (!target) {
+    // スクロールしない固定のダイアログは、見えている画面をそのまま撮る
+    await page.screenshot({ path: filePath, animations: 'disabled' });
+    shot = { method: 'fullpage', width: vp.width, height: vp.height, tiles: 1 };
+  } else if (fixedDialog && target.kind === 'element') {
+    // 固定のダイアログは、ページの中に置き直して伸ばしてから撮る。伸びきらなければつなぎ合わせ方式で撮る
+    let height = await expandFixedDialog(page);
+    if (height != null) {
+      // 背景を暗くする幕（::backdrop など）は画面の高さにしか広がらないので、撮る間だけ画面をダイアログの高さまで伸ばす
+      const resize = height > vp.height && height <= TILE_THRESHOLD_PX;
+      if (resize) {
+        await page.setViewportSize({ width: vp.width, height });
+        await page.waitForTimeout(200);
+        // 画面を伸ばすとダイアログの位置や高さが変わることがあるので測り直し、伸びた分だけ画面も伸ばし直す
+        const refit = (await fitDialogSpacer(page)) ?? height;
+        if (refit > height && refit <= TILE_THRESHOLD_PX) await page.setViewportSize({ width: vp.width, height: refit });
+        height = refit;
+      }
+      shot = { ...(await shootDocument(page, filePath, height)), method: 'expand' };
+      if (resize) await page.setViewportSize(vp);
+    } else {
+      log(`ダイアログを伸ばして撮れなかったため、つなぎ合わせ方式に切り替えます（${vp.width}px）`);
+      fellBack = true;
+      await undoExpandFixedDialog(page);
+      shot = await shootStitched(page, target, filePath, undefined, true);
+    }
+  } else if (target.kind === 'document') {
     shot = await shootDocument(page, filePath);
   } else {
     const expanded = await shootExpanded(page, target, filePath);
@@ -235,7 +303,7 @@ async function shootViewport(
     throw after ?? new BlockedError('partially-rate-limited', null);
   }
 
-  const thumbPath = join(outDir, '.thumbs', shotFileName(url, vp.width).replace(/\.png$/, '.webp'));
+  const thumbPath = join(outDir, '.thumbs', fileName.replace(/\.png$/, '.webp'));
   await makeThumbnail(filePath, thumbPath);
   return {
     viewportWidth: vp.width,

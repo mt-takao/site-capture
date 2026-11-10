@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>ダイアログのあるページ</title>
+<style>
+  body { margin: 0; font-family: sans-serif; }
+  main { padding: 24px; height: 1400px; }
+  .card { display: block; margin: 16px 0; padding: 24px; border: 1px solid #ccc; background: #fff; }
+  dialog { width: 600px; max-height: calc(100vh - 80px); padding: 0; border: 0; overflow: auto; }
+  dialog::backdrop { background: rgba(0, 0, 0, .5); }
+  .case-body { padding: 24px; }
+  .case-body section { height: 400px; border-bottom: 1px solid #eee; }
+</style>
+</head>
+<body>
+<main>
+  <h1>事例一覧</h1>
+  <!-- 押すとダイアログを開くボタン。中身は押したときに作る（実際のサイトと同じく document でクリックを受け取る） -->
+  <button class="card" data-case="a"><h3>事例A</h3><span>製造業の事例</span></button>
+  <button class="card" data-case="b"><h3>事例B</h3><span>小売業の事例</span></button>
+  <button class="card" data-case="hidden" style="display:none"><h3>非表示の事例</h3></button>
+  <!-- 押すと別のページに移動するボタン（押して撮る対象を誤って指定した場合の確認用） -->
+  <button class="card" data-nav>別のページへ</button>
+</main>
+<dialog id="case-dialog" aria-labelledby="case-title">
+  <div class="case-body" id="case-content"></div>
+</dialog>
+<script>
+  const cases = { a: '事例A：製造業の知識共有', b: '事例B：小売業の在庫管理' };
+  const dialog = document.getElementById('case-dialog');
+  document.addEventListener('click', (e) => {
+    const button = e.target.closest('[data-case]');
+    if (button) {
+      // 開くまでに少し時間がかかるダイアログ
+      setTimeout(() => {
+        document.getElementById('case-content').innerHTML =
+          `<h2 id="case-title">${cases[button.dataset.case]}</h2>` +
+          Array.from({ length: 6 }, (_, i) => `<section>セクション ${i + 1}</section>`).join('') +
+          '<p id="case-end">事例の終わり</p>';
+        dialog.showModal();
+        document.body.style.overflow = 'hidden';
+      }, 200);
+      return;
+    }
+    if (e.target.closest('[data-nav]')) location.href = '/long-static.html';
+  });
+</script>
+</body>
+</html>

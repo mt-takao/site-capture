@@ -89,6 +89,7 @@ export function parseSiteSettings(body: unknown): SiteSettings {
     beforeCaptureScript: optionalText(b.beforeCaptureScript),
     expandTogglesScript: optionalText(b.expandTogglesScript),
     reloadPerViewport: b.reloadPerViewport !== false,
+    clickSelectors: stringList(b.clickSelectors, '押してから撮る要素'),
     concurrency: optionalInt(b.concurrency, 1, 5, '同時に開くページ数'),
     intervalMs: optionalInt(b.intervalMs, 0, 600000, 'アクセス間隔'),
   };

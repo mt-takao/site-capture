@@ -77,4 +77,9 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE crawls ADD COLUMN warnings_json TEXT NOT NULL DEFAULT '[]';
   ALTER TABLE crawls ADD COLUMN site_settings_json TEXT;
   `,
+  // J-10: 要素を押してから撮るページ。押す要素（セレクタ・何番目か・名前）を残す（撮り直しでも同じ要素を押すため）。
+  // normalized_url は元のページの URL に #click-<番号> を付けたものにする（同じ撮影セッションの中で重ならないように）
+  `
+  ALTER TABLE pages ADD COLUMN click_json TEXT;
+  `,
 ];

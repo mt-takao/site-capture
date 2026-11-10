@@ -8,6 +8,8 @@ import { defaultCrawlSettings, type CrawlEvent, type CrawlSettings } from '../sr
 import { Store } from '../src/db/store.js';
 import { CrawlRunner } from '../src/jobs/crawl-runner.js';
 import { BLOG_POSTS, startSiteServer } from './helpers/site-server.js';
+import { startFixtureServer } from './helpers/fixture-server.js';
+import { DEFAULT_SITE_SETTINGS } from '@site-capture/shared';
 
 // テスト用サイトを実際に巡回する結合テスト。速く終わるよう画面幅は1つ、待ち時間は短くする
 
@@ -121,4 +123,39 @@ test('途中で止めると、撮影中のページを撮り終えて stopped �
   assert.ok(r.paths('done').length >= 1 && r.paths('done').length <= 2);
   assert.ok(r.paths('queued').length > 0);
   assert.equal(r.paths('capturing').length, 0);
+});
+
+test('サイト設定の「押してから撮る要素」を、元のページとは別のページとして撮る（J-10）', async () => {
+  const fixtures = await startFixtureServer();
+  try {
+    const site = store.createSiteSettings({
+      ...DEFAULT_SITE_SETTINGS,
+      name: 'ダイアログ',
+      hostPatterns: ['click-test.invalid'],
+      clickSelectors: ['[data-case]', '[data-nav]'],
+    });
+    const runner = new CrawlRunner({
+      store,
+      browser,
+      settings: { ...settings(), startUrl: `${fixtures.origin}/dialog.html`, useSitemap: false, siteSettingsId: site.id },
+      outputDir: join(dir, 'click'),
+    });
+    assert.equal(await runner.run(), 'done');
+    const pages = store.listPages(runner.crawlId);
+    const row = (suffix: string) => pages.find((p) => p.normalized_url.endsWith(suffix))!;
+    // 元のページ（リンクはない）と、押して撮った 3 つ
+    assert.equal(pages.length, 4);
+    assert.equal(row('/dialog.html').status, 'done');
+    assert.equal(row('#click-1').status, 'done');
+    assert.equal(row('#click-1').title, '事例A：製造業の知識共有');
+    assert.equal(row('#click-2').title, '事例B：小売業の在庫管理');
+    // 別のページに移動する要素は撮らずに失敗にする
+    assert.equal(row('#click-3').status, 'failed');
+    assert.match(row('#click-3').error_message!, /別のページ/);
+    assert.match(store.listShots(row('#click-2').id)[0]!.file_path, /dialog__click-2__800\.png$/);
+    // 押して撮ったページは最大ページ数に数えないので、撮り直しても元のページを撮り直さない
+    assert.equal(store.prepareRetry(runner.crawlId), 1);
+  } finally {
+    await fixtures.close();
+  }
 });

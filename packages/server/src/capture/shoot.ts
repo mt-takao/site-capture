@@ -16,11 +16,13 @@ export type ShotResult = {
 };
 
 // ページ全体（document）のスクロールで撮る。高さが閾値を超えたら分割して結合する
-export async function shootDocument(page: Page, outPath: string): Promise<ShotResult> {
+// maxHeight を渡すと、ページの先頭からその高さまでを撮る
+export async function shootDocument(page: Page, outPath: string, maxHeight?: number): Promise<ShotResult> {
   const size = await page.evaluate(() => {
     const doc = document.scrollingElement ?? document.documentElement;
     return { width: Math.ceil(doc.scrollWidth), height: Math.ceil(doc.scrollHeight) };
   });
+  if (maxHeight != null) size.height = Math.min(size.height, maxHeight);
   const width = page.viewportSize()?.width ?? size.width;
 
   // 横にはみ出す要素があっても画像の幅は画面幅にそろえる（展開方式で横幅が広がる場合があるため）
@@ -99,6 +101,8 @@ export async function shootStitched(
   target: Extract<ScrollTarget, { kind: 'element' }>,
   outPath: string,
   stepWaitMs = 200,
+  // 画像の余白を、1枚目の画面の左下の色で塗る（固定のダイアログを撮るとき、ダイアログの横の背景を続けて見せるため）
+  fillFromFirstShot = false,
 ): Promise<ShotResult> {
   const viewport = page.viewportSize();
   if (!viewport) throw new Error('viewport is not set');
@@ -164,7 +168,12 @@ export async function shootStitched(
       .toBuffer();
     layers.push({ input: bottom, top: height - below, left: 0 });
   }
-  await sharp({ create: { width: viewport.width, height: Math.max(height, totalHeight), channels: 4, background: '#ffffff' } })
+  let background: { r: number; g: number; b: number; alpha: number } | string = '#ffffff';
+  if (fillFromFirstShot) {
+    const px = await sharp(first).extract({ left: 0, top: viewport.height - 1, width: 1, height: 1 }).removeAlpha().raw().toBuffer();
+    background = { r: px[0]!, g: px[1]!, b: px[2]!, alpha: 1 };
+  }
+  await sharp({ create: { width: viewport.width, height: Math.max(height, totalHeight), channels: 4, background } })
     .composite(layers)
     .png()
     .toFile(outPath);

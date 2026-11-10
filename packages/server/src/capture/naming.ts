@@ -19,8 +19,10 @@ export function fileBaseForUrl(url: string): string {
   return base;
 }
 
-export function shotFileName(url: string, viewportWidth: number): string {
-  return `${fileBaseForUrl(url)}__${viewportWidth}.png`;
+// 要素を押してから撮った画像には、押した要素の通し番号（1 から）を付ける。例: index__click-2__1440.png
+export function shotFileName(url: string, viewportWidth: number, clickNo?: number): string {
+  const click = clickNo == null ? '' : `__click-${clickNo}`;
+  return `${fileBaseForUrl(url)}${click}__${viewportWidth}.png`;
 }
 
 function safeSegment(segment: string): string {

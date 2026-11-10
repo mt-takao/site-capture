@@ -76,9 +76,15 @@ export type SiteSettings = {
   beforeCaptureScript?: string; // J-07
   expandTogglesScript?: string; // J-09（expandToggles が true のときだけ実行）
   reloadPerViewport: boolean; // 画面幅ごとに開き直すか（設計書 6.1）
+  // J-10: 押してから撮る要素（CSS セレクタ）。当てはまる要素を1つずつ押し、開いたダイアログなどを別の画像として撮る。
+  // 押すと送信・削除などが起きる要素を選ばないよう、自動では探さず、ここで指定したものだけを押す
+  clickSelectors?: string[];
   concurrency?: number; // C-11 の上書き
   intervalMs?: number; // C-11 の上書き
 };
+
+// J-10: 1ページあたり、押して撮る要素の上限
+export const MAX_CLICK_STATES_PER_PAGE = 20;
 
 export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   name: '標準',
@@ -158,6 +164,8 @@ export type PageItem = {
   finalUrl: string | null;
   errorMessage: string | null;
   waitTimedOut: boolean;
+  // J-10: 要素を押してから撮った画像なら、押した要素（そのページの中での通し番号・名前）。ふつうのページは null
+  click: { no: number; label: string } | null;
   shots: ShotItem[];
 };
 

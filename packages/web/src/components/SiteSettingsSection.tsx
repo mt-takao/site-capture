@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { DEFAULT_SITE_SETTINGS, type SiteSettings, type SiteSettingsItem } from '@site-capture/shared';
+import { DEFAULT_SITE_SETTINGS, MAX_CLICK_STATES_PER_PAGE, type SiteSettings, type SiteSettingsItem } from '@site-capture/shared';
 import { api } from '../lib/api';
 import { Badge } from './StatusBadge';
 import styles from './SiteSettingsSection.module.css';
@@ -17,6 +17,7 @@ type Draft = {
   beforeCaptureScript: string;
   expandTogglesScript: string;
   reloadPerViewport: boolean;
+  clickSelectors: string;
   concurrency: string;
   intervalMs: string;
 };
@@ -35,6 +36,7 @@ function toDraft(s: SiteSettings, id: string | null): Draft {
     beforeCaptureScript: s.beforeCaptureScript ?? '',
     expandTogglesScript: s.expandTogglesScript ?? '',
     reloadPerViewport: s.reloadPerViewport,
+    clickSelectors: (s.clickSelectors ?? []).join('\n'),
     concurrency: s.concurrency == null ? '' : String(s.concurrency),
     intervalMs: s.intervalMs == null ? '' : String(s.intervalMs),
   };
@@ -51,6 +53,7 @@ function fromDraft(d: Draft): SiteSettings {
     beforeCaptureScript: d.beforeCaptureScript || undefined,
     expandTogglesScript: d.expandTogglesScript || undefined,
     reloadPerViewport: d.reloadPerViewport,
+    clickSelectors: lines(d.clickSelectors),
     concurrency: d.concurrency === '' ? undefined : Number(d.concurrency),
     intervalMs: d.intervalMs === '' ? undefined : Number(d.intervalMs),
   };
@@ -158,6 +161,13 @@ export function SiteSettingsSection() {
               <input className="input" type="number" min={0} step={1000} value={draft.intervalMs} onChange={(e) => set('intervalMs', e.target.value)} />
             </label>
           </div>
+          <label className={styles.field}>
+            押してから撮る要素（CSS セレクタ、1行に1つ）
+            <textarea className="input mono" rows={2} value={draft.clickSelectors} onChange={(e) => set('clickSelectors', e.target.value)} placeholder={'[data-case]\nbutton[aria-haspopup="dialog"]'} />
+            <span className={styles.note}>
+              押したときだけ開くダイアログなどを撮ります。当てはまる要素を1つずつ押し、開いた画面を元のページとは別の画像として撮ります（1ページに{MAX_CLICK_STATES_PER_PAGE}個まで）。送信や削除のボタンには当てはまらないように書いてください
+            </span>
+          </label>
           <label className={styles.field}>
             撮影前に実行するスクリプト（JavaScript）
             <textarea className="input" rows={5} value={draft.beforeCaptureScript} onChange={(e) => set('beforeCaptureScript', e.target.value)} placeholder="document.querySelector('.modal-close')?.click();" />

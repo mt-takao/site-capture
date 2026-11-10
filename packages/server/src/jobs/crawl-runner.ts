@@ -5,7 +5,8 @@ import { HostGate, withRateLimitRetry } from '../capture/host-gate.js';
 import { formatRateLimitReport } from '../capture/rate-limit-log.js';
 import type { SiteSettingsItem } from '@site-capture/shared';
 import type { SessionStorageByOrigin } from '../auth/saved-state.js';
-import { viewportForWidth } from '../capture/types.js';
+import { viewportForWidth, type ClickTarget } from '../capture/types.js';
+import { ClickNavigatedError, ClickTargetNotFoundError } from '../capture/click.js';
 import { contextFetchText } from '../crawler/fetch-text.js';
 import { normalizeUrl } from '../crawler/normalize.js';
 import { loadRobots, type RobotsRules } from '../crawler/robots.js';
@@ -18,7 +19,8 @@ import { resolveSiteSettings } from '../presets/index.js';
 
 // 設計書 5.1「処理の流れ」: 1つの撮影セッション（起点URLから巡回して全ページを撮る）を実行する
 
-type QueueItem = { pageId: number; url: string; depth: number };
+// click: 要素を押してから撮るページ（J-10）
+type QueueItem = { pageId: number; url: string; depth: number; click?: ClickTarget };
 
 class StoppedError extends Error {}
 
@@ -135,9 +137,13 @@ export class CrawlRunner {
   private restoreQueue(): void {
     for (const p of this.store.listPages(this.crawlId)) {
       if (p.status === 'skipped') continue;
-      this.admitted++;
-      this.sampler.admit(p.normalized_url);
-      if (p.status === 'queued') this.queue.push({ pageId: p.id, url: p.url, depth: p.depth });
+      const click = p.click_json ? (JSON.parse(p.click_json) as ClickTarget) : undefined;
+      // 押して撮るページは、最大ページ数と間引きの数に入れない（元のページの一部として扱う）
+      if (!click) {
+        this.admitted++;
+        this.sampler.admit(p.normalized_url);
+      }
+      if (p.status === 'queued') this.queue.push({ pageId: p.id, url: p.url, depth: p.depth, click });
     }
   }
 
@@ -190,6 +196,7 @@ export class CrawlRunner {
             outDir: this.outputDir,
             options: settings.capture,
             site: this.site,
+            click: item.click,
             log: (message) => this.emit({ type: 'warning', message }),
             onRateLimited: (report) => console.log(formatRateLimitReport(report, `#${this.crawlId} `)),
           });
@@ -204,7 +211,9 @@ export class CrawlRunner {
       for (const s of result.shots) this.emit({ type: 'shot-done', pageId: item.pageId, width: s.viewportWidth, thumbPath: s.thumbPath });
       this.emit({ type: 'page-done', pageId: item.pageId, waitTimedOut: result.shots.some((s) => s.waitTimedOut) });
 
+      if (item.click) return;
       if (item.depth === 0) this.warnIfLoginScreen(item.url, result.finalUrl, result.hasPasswordField);
+      this.enqueueClickTargets(item, result.clickTargets);
 
       // 転送された先が範囲外（外部サイト）なら、そのページのリンクはたどらない
       const finalHost = new URL(result.finalUrl).hostname;
@@ -214,6 +223,10 @@ export class CrawlRunner {
     } catch (e) {
       if (e instanceof StoppedError) {
         store.setPageStatus(item.pageId, 'queued');
+      } else if (e instanceof ClickTargetNotFoundError || e instanceof ClickNavigatedError) {
+        const message = e instanceof ClickTargetNotFoundError ? '押す要素が見つかりませんでした（ページの作りが変わった可能性があります）' : e.message;
+        store.setPageStatus(item.pageId, 'failed', { errorMessage: message });
+        this.emit({ type: 'page-failed', pageId: item.pageId, error: message });
       } else if (e instanceof NotHtmlError) {
         this.skip(item.pageId, 'not-html');
       } else {
@@ -271,6 +284,29 @@ export class CrawlRunner {
     }
     this.admitted++;
     this.queue.push({ pageId, url: url.href, depth });
+  }
+
+  // J-10: 押して撮る要素を、元のページの子として撮影待ちに入れる。
+  // 同じ URL を撮り直したときに重ならないよう、正規化URL に #click-<番号> を付けて区別する
+  private enqueueClickTargets(item: QueueItem, targets: ClickTarget[]): void {
+    const normalized = normalizeUrl(item.url, this.settings);
+    const { pathname } = new URL(normalized);
+    for (const target of targets) {
+      const pageId = this.store.insertPage({
+        crawlId: this.crawlId,
+        url: item.url,
+        normalizedUrl: `${normalized}#click-${target.no}`,
+        path: pathname,
+        groupKey: groupKey(normalized),
+        depth: item.depth,
+        foundFromPageId: item.pageId,
+        status: 'queued',
+        click: target,
+      });
+      if (pageId == null) continue;
+      this.emit({ type: 'page-found', pageId, url: item.url, depth: item.depth });
+      this.queue.push({ pageId, url: item.url, depth: item.depth, click: target });
+    }
   }
 
   // 設計書 7.1: 起点ページにログイン画面が写っていそうなら、ログインが切れている（または保存できていない）可能性を知らせる。

@@ -289,8 +289,9 @@ function PageCard({ page, crawlId, width }: { page: PageItem; crawlId: number; w
         <span className={styles.cardPath} title={page.url}>
           {page.path}
         </span>
-        {page.status !== 'done' || page.waitTimedOut || (page.httpStatus ?? 200) >= 400 ? (
+        {page.status !== 'done' || page.waitTimedOut || (page.httpStatus ?? 200) >= 400 || page.click ? (
           <div className={styles.cardBadges}>
+            {page.click && <Badge>押した後の画面</Badge>}
             {page.status !== 'done' && <PageStatusBadge status={page.status} />}
             {page.waitTimedOut && <Badge tone="warning">待ちきれずに撮影</Badge>}
             {(page.httpStatus ?? 200) >= 400 && <Badge tone="warning">HTTP {page.httpStatus}</Badge>}

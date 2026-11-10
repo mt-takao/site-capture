@@ -2,6 +2,11 @@ import type { ComparePair, CompareResult, CrawlDetail, CrawlSettings, CrawlSumma
 import type { CrawlRow, PageRow, ShotRow, Store } from '../db/store.js';
 import type { SiteSettingsItem } from '@site-capture/shared';
 import { resolveSiteSettings } from '../presets/index.js';
+import type { ClickTarget } from '../capture/types.js';
+
+function clickItem(c: ClickTarget): PageItem['click'] {
+  return { no: c.no, label: c.label };
+}
 
 // データベースの行を API の形（packages/shared の型）に変える
 
@@ -64,7 +69,8 @@ export function pageItems(crawlId: number, store: Store): PageItem[] {
   return store.listPages(crawlId).map((p: PageRow) => ({
     id: p.id,
     url: p.url,
-    path: new URL(p.normalized_url).pathname + new URL(p.normalized_url).search,
+    // 押してから撮ったページは #click-<番号> まで含める（比較でも、同じページの同じ番号どうしを組み合わせる）
+    path: new URL(p.normalized_url).pathname + new URL(p.normalized_url).search + new URL(p.normalized_url).hash,
     depth: p.depth,
     status: p.status,
     skipReason: p.skip_reason,
@@ -73,6 +79,7 @@ export function pageItems(crawlId: number, store: Store): PageItem[] {
     finalUrl: p.final_url,
     errorMessage: p.error_message,
     waitTimedOut: p.wait_timed_out === 1,
+    click: p.click_json ? clickItem(JSON.parse(p.click_json) as ClickTarget) : null,
     shots: shotsByPage.get(p.id) ?? [],
   }));
 }

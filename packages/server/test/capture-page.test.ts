@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { chromium, type Browser } from 'playwright';
 import { BlockedError } from '../src/capture/blocked.js';
+import { ClickNavigatedError, ClickTargetNotFoundError } from '../src/capture/click.js';
 import { capturePage, createCaptureContext, NotHtmlError, type RateLimitReport } from '../src/capture/capture-page.js';
 import { formatRateLimitReport } from '../src/capture/rate-limit-log.js';
 import { collectLinks, hideByText, injectCaptureStyles, runPageScript } from '../src/capture/prepare.js';
@@ -102,6 +103,81 @@ describe('撮影', () => {
     assert.ok(r.links.some((u) => u.endsWith('/about')));
   });
 });
+
+describe('要素を押してから撮る（J-10）', () => {
+  const clickSite: SiteSettings = { ...DEFAULT_SITE_SETTINGS, clickSelectors: ['[data-case]', '[data-nav]'] };
+
+  test('ふつうのページの撮影で、押す要素を見えているものだけ集める', async () => {
+    const r = await capture('/dialog.html', clickSite, 'dialog-normal');
+    assert.deepEqual(
+      r.clickTargets.map((t) => [t.no, t.selector, t.index, t.label]),
+      [
+        [1, '[data-case]', 0, '事例A'],
+        [2, '[data-case]', 1, '事例B'],
+        [3, '[data-nav]', 0, '別のページへ'],
+      ],
+    );
+  });
+
+  test('押して開いたダイアログを、中のスクロールの最後まで撮る', async () => {
+    const r = await capturePageWithClick('/dialog.html', { selector: '[data-case]', index: 1, no: 2, label: '事例B' }, 'dialog-b');
+    assert.equal(r.title, '事例B：小売業の在庫管理');
+    assert.deepEqual(r.links, []);
+    assert.deepEqual(r.clickTargets, []);
+    for (const s of r.shots) {
+      assert.match(s.filePath, /dialog__click-2__\d+\.png$/);
+      // 固定のダイアログをページの中に置き直して伸ばし、1回で撮る（つなぎ目ができないように）
+      assert.equal(s.method, 'expand');
+      assert.equal(s.fellBackToStitch, false);
+      // ダイアログの中身（セクション 6 つ × 400px）が写るまで画像が伸びている
+      assert.ok(s.imageHeight > 2400, `${s.viewportWidth}px: ${s.imageHeight}`);
+    }
+  });
+
+  test('1回の読み込みで画面幅を切り替える設定でも、ダイアログを開いたまま撮る', async () => {
+    const r = await capturePageWithClick(
+      '/dialog.html',
+      { selector: '[data-case]', index: 0, no: 1, label: '事例A' },
+      'dialog-single',
+      { reloadPerViewport: false },
+    );
+    assert.equal(r.title, '事例A：製造業の知識共有');
+    assert.ok(r.shots.every((s) => s.imageHeight > 2400));
+  });
+
+  test('押すと別のページに移動する要素や、見つからない要素は撮らない', async () => {
+    await assert.rejects(
+      capturePageWithClick('/dialog.html', { selector: '[data-nav]', index: 0, no: 3, label: '別のページへ' }, 'dialog-nav'),
+      ClickNavigatedError,
+    );
+    await assert.rejects(
+      capturePageWithClick('/dialog.html', { selector: '[data-case]', index: 5, no: 9, label: '事例X' }, 'dialog-missing'),
+      ClickTargetNotFoundError,
+    );
+  });
+});
+
+async function capturePageWithClick(
+  path: string,
+  click: { selector: string; index: number; no: number; label: string },
+  outName: string,
+  site: Partial<SiteSettings> = {},
+) {
+  const context = await createCaptureContext(browser);
+  try {
+    return await capturePage({
+      context,
+      url: `${server.origin}${path}`,
+      viewports,
+      outDir: join(workDir, outName),
+      options,
+      site: { ...DEFAULT_SITE_SETTINGS, ...site },
+      click,
+    });
+  } finally {
+    await context.close();
+  }
+}
 
 describe('ページへの処理', () => {
   test('トグルを開くスクリプトは、入れ子のトグルも開き、ポップアップのボタンは押さない', async () => {

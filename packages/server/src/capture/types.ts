@@ -19,6 +19,10 @@ export type ShotRecord = {
   waitTimedOut: boolean;
 };
 
+// J-10: 押してから撮る要素。セレクタに当てはまる「見えている要素」のうち何番目か（index、0 から）で指す。
+// no はそのページの中での通し番号（1 から）。ファイル名と、撮影結果の中での区別に使う
+export type ClickTarget = { selector: string; index: number; no: number; label: string };
+
 export type CapturePageResult = {
   url: string;
   finalUrl: string;
@@ -26,6 +30,7 @@ export type CapturePageResult = {
   title: string;
   links: string[]; // いちばん広い画面幅で集めたリンク（絶対URL、未正規化）
   hasPasswordField: boolean; // 見えているパスワードの入力欄があるか（ログイン画面が写っていないかの判定に使う）
+  clickTargets: ClickTarget[]; // J-10: サイト設定の clickSelectors に当てはまった要素（押して撮るページの撮影では空）
   shots: ShotRecord[];
 };
 

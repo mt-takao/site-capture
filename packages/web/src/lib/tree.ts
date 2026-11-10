@@ -13,7 +13,7 @@ export type TreeNode = {
 export function buildTree(pages: PageItem[]): TreeNode {
   const root: TreeNode = { segment: '/', prefix: '/', page: null, children: [], count: 0 };
   for (const p of pages) {
-    const pathOnly = p.path.split('?')[0]!;
+    const pathOnly = p.path.split(/[?#]/)[0]!;
     const segments = pathOnly.split('/').filter(Boolean);
     let node = root;
     node.count++;
@@ -27,8 +27,9 @@ export function buildTree(pages: PageItem[]): TreeNode {
       child.count++;
       node = child;
     }
-    // クエリ付きのページは同じパスの下にまとめ、パスちょうどのページを優先して表示する
-    if (!node.page || !p.path.includes('?')) node.page ??= p;
+    // クエリ付きのページと、要素を押して撮ったページ（#click-n）は同じパスの下にまとめ、パスちょうどのページを優先して表示する
+    if (!/[?#]/.test(p.path) && node.page && /[?#]/.test(node.page.path)) node.page = p;
+    else node.page ??= p;
   }
   const sort = (n: TreeNode) => {
     n.children.sort((a, b) => a.segment.localeCompare(b.segment, 'ja'));
@@ -40,6 +41,6 @@ export function buildTree(pages: PageItem[]): TreeNode {
 
 export function inPrefix(p: PageItem, prefix: string): boolean {
   if (prefix === '/') return true;
-  const path = p.path.split('?')[0]!;
+  const path = p.path.split(/[?#]/)[0]!;
   return path === prefix || path.startsWith(prefix + '/');
 }

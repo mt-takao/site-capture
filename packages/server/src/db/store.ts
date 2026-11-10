@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import type { ShotRecord } from '../capture/types.js';
+import type { ClickTarget, ShotRecord } from '../capture/types.js';
 import type { CrawlSettings, SkipReason } from '../crawler/types.js';
 import { MIGRATIONS } from './schema.js';
 
@@ -42,6 +42,7 @@ export type PageRow = {
   final_url: string | null;
   error_message: string | null;
   wait_timed_out: number;
+  click_json: string | null;
 };
 
 export type AuthProfileRow = {
@@ -188,15 +189,19 @@ export class Store {
     foundFromPageId: number | null;
     status: PageStatus;
     skipReason?: SkipReason | null;
+    click?: ClickTarget | null;
   }): number | null {
     const time = now();
     const r = this.db
       .prepare(
         `INSERT OR IGNORE INTO pages
-           (crawl_id, url, normalized_url, path, group_key, depth, found_from_page_id, status, skip_reason, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (crawl_id, url, normalized_url, path, group_key, depth, found_from_page_id, status, skip_reason, created_at, updated_at, click_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(p.crawlId, p.url, p.normalizedUrl, p.path, p.groupKey, p.depth, p.foundFromPageId, p.status, p.skipReason ?? null, time, time);
+      .run(
+        p.crawlId, p.url, p.normalizedUrl, p.path, p.groupKey, p.depth, p.foundFromPageId, p.status, p.skipReason ?? null, time, time,
+        p.click ? JSON.stringify(p.click) : null,
+      );
     return r.changes === 0 ? null : Number(r.lastInsertRowid);
   }
 

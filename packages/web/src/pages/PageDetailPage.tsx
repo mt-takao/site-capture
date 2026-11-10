@@ -106,6 +106,14 @@ export function PageDetailPage() {
                 <dd>{page.finalUrl}</dd>
               </>
             )}
+            {page.click && (
+              <>
+                <dt>押した要素</dt>
+                <dd>
+                  {page.click.no}番目: {page.click.label}
+                </dd>
+              </>
+            )}
             <dt>ステータス</dt>
             <dd>{page.httpStatus ?? '—'}</dd>
             <dt>階層</dt>
