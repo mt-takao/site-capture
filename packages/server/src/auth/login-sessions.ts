@@ -66,7 +66,11 @@ export class LoginSessionManager {
     await chmod(dir, 0o700);
     const profileId = randomUUID();
     const path = join(dir, `${profileId}.json`);
-    const state: SavedLoginState = { ...(await s.context.storageState()), sessionStorage: await collectSessionStorage(s.context) };
+    const state: SavedLoginState = {
+      ...(await s.context.storageState()),
+      sessionStorage: await collectSessionStorage(s.context),
+      userAgent: await userAgentOf(s.context),
+    };
     await writeFile(path, JSON.stringify(state), { mode: 0o600 });
     await chmod(path, 0o600);
     this.store.createAuthProfile({ id: profileId, name: s.info.name, origin: new URL(s.info.url).origin, storageStatePath: path });
@@ -107,4 +111,16 @@ function parseHttpUrl(url: string): URL {
   }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new LoginSessionError('http または https のURLを入力してください');
   return u;
+}
+
+// ログインしたブラウザの User-Agent。開いているタブから読む（タブがなければ新しく開いて読む）
+async function userAgentOf(context: BrowserContext): Promise<string | undefined> {
+  for (const page of context.pages()) {
+    const ua = await page.evaluate(() => navigator.userAgent).catch(() => null);
+    if (ua) return ua;
+  }
+  const page = await context.newPage().catch(() => null);
+  const ua = await page?.evaluate(() => navigator.userAgent).catch(() => null);
+  await page?.close().catch(() => {});
+  return ua ?? undefined;
 }

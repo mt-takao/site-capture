@@ -56,6 +56,22 @@ async function crawl(name: string, overrides: Partial<CrawlSettings> = {}, onEve
   return { runner, status, events, pages, paths, crawl: store.getCrawl(runner.crawlId)! };
 }
 
+test('起点のページが robots.txt で禁止されていたら、開かずに飛ばし、理由と撮る方法を警告で知らせる', async () => {
+  const r = await crawl('robots-start', { startUrl: `${site.origin}/private/secret`, useSitemap: false });
+  assert.equal(r.status, 'done');
+  assert.deepEqual(r.paths('skipped'), ['/private/secret']);
+  const warnings = r.events.filter((e) => e.type === 'warning').map((e) => (e.type === 'warning' ? e.message : ''));
+  assert.ok(warnings.some((m) => m.includes('robots.txt') && m.includes('撮らない」を外して')));
+});
+
+test('起点URLより下の階層だけを撮る設定では、ほかのページとサイトマップのページを撮らない（C-02b）', async () => {
+  const r = await crawl('only-under', { startUrl: `${site.origin}/blog`, onlyUnderStartPath: true });
+  assert.equal(r.status, 'done');
+  assert.deepEqual(r.paths('done'), ['/blog', ...allPosts].sort());
+  // /about や、サイトマップにだけ載っている /orphan は記録もしない
+  assert.ok(!r.pages.some((p) => /\/(about|orphan|company)/.test(p.url)));
+});
+
 const allPosts = Array.from({ length: BLOG_POSTS }, (_, i) => `/blog/post-${i + 1}`);
 
 test('サイト全体を巡回し、範囲内のページをすべて1回ずつ撮る', async () => {
@@ -68,6 +84,8 @@ test('サイト全体を巡回し、範囲内のページをすべて1回ずつ�
   assert.deepEqual(r.paths('skipped'), ['/private/secret']);
   assert.equal(r.pages.find((p) => p.path === '/private/secret')!.skip_reason, 'robots');
   assert.ok(!site.requests.includes('/private/secret'));
+  // 起点以外のページが禁止されているだけなら、robots.txt の警告は出さない
+  assert.ok(!r.events.some((e) => e.type === 'warning' && e.message.includes('robots.txt')));
   // 外部サイト・PDF・ログアウト・mailto は記録しない
   assert.ok(!r.pages.some((p) => /external|\.pdf|logout|mailto/.test(p.url)));
   assert.equal(r.paths('failed').length, 0);

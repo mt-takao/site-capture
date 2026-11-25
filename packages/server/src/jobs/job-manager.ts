@@ -91,6 +91,8 @@ export class JobManager {
       // ファイルには sessionStorage も入っているので、Playwright には Cookie と localStorage の分だけを渡す
       const saved = await readSavedLoginState(profile.storage_state_path);
       options.storageState = saved.storageState;
+      // ログインしたブラウザと同じ User-Agent で撮る（ログインした状態を User-Agent と結びつけるサイトのため。saved-state.ts）
+      if (saved.userAgent) options.userAgent = saved.userAgent;
       sessionStorage = saved.sessionStorage;
     }
     if (basicAuth && basicAuth.username) {

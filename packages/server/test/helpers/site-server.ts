@@ -11,11 +11,15 @@ import { createServer } from 'node:http';
 //   /members           Cookie（session=ok）がないと /login に転送される会員ページ
 //   /basic             Basic 認証（user / pass）が必要なページ
 //   /flaky             最初の1回だけ応答に5秒かかる（撮り直しの確認用）
+//   /ua-bound          Cookie（session=ok）に加えて、User-Agent がログインしたブラウザ（LOGIN_BROWSER_UA）と同じでないと /login に転送される
 //   /session-gated     転送せず同じ URL のまま、sessionStorage に入室の印がなければパスワードの入力画面を出す
 // variant 'b' は「リニューアル後」の版。比較画面の確認に使う。
 //   トップの見出しと帯が変わり、/contact へのリンクがなくなり、/news が増える
 
 export const BLOG_POSTS = 8;
+
+// テストのログイン用ブラウザの User-Agent。撮影用のブラウザとは違うものにする（本番でも、画面ありと画面なしで違う）
+export const LOGIN_BROWSER_UA = 'SiteCaptureTestLogin/1.0';
 
 function page(title: string, links: string[], extra = ''): string {
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>${title}</title>
@@ -68,6 +72,14 @@ export async function startSiteServer(port = 0, variant: 'a' | 'b' = 'a'): Promi
         return void res.end();
       }
       return html(200, page('会員情報', ['/members']));
+    }
+    if (p === '/ua-bound') {
+      // ログインした状態をブラウザの種類（User-Agent）と結びつけるサイト（例: FuelPHP のセッションの初期設定）
+      if (!/(^|;\s*)session=ok(;|$)/.test(req.headers.cookie ?? '') || req.headers['user-agent'] !== LOGIN_BROWSER_UA) {
+        res.writeHead(302, { location: '/login?next=/ua-bound' });
+        return void res.end();
+      }
+      return html(200, page('User-Agent と結びついた会員ページ', []));
     }
     if (p === '/login') return html(200, page('ログイン', []));
     if (p === '/basic') {

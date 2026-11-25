@@ -13,7 +13,7 @@ import { LoginSessionManager } from '../src/auth/login-sessions.js';
 import { buildServer } from '../src/api/server.js';
 import { Store } from '../src/db/store.js';
 import { JobManager } from '../src/jobs/job-manager.js';
-import { startSiteServer } from './helpers/site-server.js';
+import { LOGIN_BROWSER_UA, startSiteServer } from './helpers/site-server.js';
 
 // API の結合テスト。テスト用サイトに対して実際に撮影を走らせる
 
@@ -41,7 +41,7 @@ before(async () => {
   store = new Store(join(home, 'test.db'));
   jobs = new JobManager(store, () => chromium.launch());
   // テストではログイン用ブラウザも画面なしで起動する
-  logins = new LoginSessionManager(store, () => chromium.launch());
+  logins = new LoginSessionManager(store, () => chromium.launch({ args: [`--user-agent=${LOGIN_BROWSER_UA}`] }));
   port = await freePort();
   app = await buildServer({ store, jobs, logins, port, sseHeartbeatMs: 200 });
   await app.listen({ host: '127.0.0.1', port });
@@ -245,6 +245,20 @@ test('ログインせずに会員ページを撮ると、ログイン画面に�
   // 警告はデータベースにも残り、撮影が終わった後も見られる
   assert.ok(r.detail.warnings.some((w) => w.includes('ログイン画面')));
   assert.equal(r.pages[0]!.title, 'ログイン');
+});
+
+test('ログインしたブラウザの User-Agent も保存し、撮影のときに同じものを使う（User-Agent と結びついたログイン状態）', async () => {
+  const opened = await openLogin('/login', 'User-Agent と結びついた会員');
+  await logins.contextOf(opened.id)!.addCookies([{ name: 'session', value: 'ok', url: site.origin }]);
+  const saved = await api<SavedAuthProfile>(`/api/auth-profiles/sessions/${opened.id}/save`, { method: 'POST' });
+  assert.equal(saved.status, 201);
+  const row = store.getAuthProfile(saved.body.id)!;
+  assert.equal(JSON.parse(await readFile(row.storage_state_path, 'utf8')).userAgent, LOGIN_BROWSER_UA);
+
+  const r = await crawlAndWait(fastSettings({ startUrl: `${site.origin}/ua-bound`, authProfileId: saved.body.id, maxPages: 1 }));
+  assert.equal(r.pages[0]!.title, 'User-Agent と結びついた会員ページ');
+  assert.deepEqual(r.detail.warnings, []);
+  await api(`/api/auth-profiles/${saved.body.id}`, { method: 'DELETE' });
 });
 
 test('ブラウザを閉じた後は保存できず、分かるメッセージを返す', async () => {

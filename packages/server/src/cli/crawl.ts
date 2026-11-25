@@ -14,6 +14,7 @@ const HELP = `使い方: pnpm crawl <URL> [オプション]
   --max-pages 200           撮る最大ページ数
   --max-depth <n>           起点からリンクをたどる最大回数（初期値: 制限なし）
   --include-subdomains      サブドメインも巡回する
+  --only-under-start-path   起点URLより下の階層だけを撮る
   --keep-query              パラメータだけが違うURLを別ページとして撮る
   --sample <n>              同じ階層のページは先頭 n 件だけ撮る（トップ直下は除く）
   --exclude <パターン>      除外するURLのパターン（複数指定可。* でワイルドカード）
@@ -31,6 +32,7 @@ const { values, positionals } = parseArgs({
     'max-pages': { type: 'string' },
     'max-depth': { type: 'string' },
     'include-subdomains': { type: 'boolean', default: false },
+    'only-under-start-path': { type: 'boolean', default: false },
     'keep-query': { type: 'boolean', default: false },
     sample: { type: 'string' },
     exclude: { type: 'string', multiple: true, default: [] },
@@ -57,6 +59,7 @@ const settings: CrawlSettings = {
   maxPages: values['max-pages'] ? Number(values['max-pages']) : defaults.maxPages,
   maxDepth: values['max-depth'] ? Number(values['max-depth']) : null,
   includeSubdomains: values['include-subdomains'],
+  onlyUnderStartPath: values['only-under-start-path'],
   keepQueryParams: values['keep-query'],
   sampling: values.sample ? { mode: 'firstN', n: Number(values.sample), prefixes: 'auto' } : { mode: 'all' },
   excludePatterns: [...defaults.excludePatterns, ...values.exclude],

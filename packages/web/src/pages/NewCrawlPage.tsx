@@ -24,6 +24,7 @@ export function NewCrawlPage() {
   const [widths, setWidths] = useState<number[]>(defaults.viewports);
   const [customWidth, setCustomWidth] = useState('');
   const [includeSubdomains, setIncludeSubdomains] = useState(false);
+  const [onlyUnderStartPath, setOnlyUnderStartPath] = useState(false);
   const [keepQuery, setKeepQuery] = useState(false);
   const [sampleMode, setSampleMode] = useState<'all' | 'firstN'>('all');
   const [sampleN, setSampleN] = useState(3);
@@ -64,6 +65,7 @@ export function NewCrawlPage() {
         setUrl(s.startUrl);
         setWidths(s.viewports);
         setIncludeSubdomains(s.includeSubdomains);
+        setOnlyUnderStartPath(s.onlyUnderStartPath === true);
         setKeepQuery(s.keepQueryParams);
         setSampleMode(s.sampling.mode);
         if (s.sampling.mode === 'firstN') setSampleN(s.sampling.n);
@@ -126,6 +128,7 @@ export function NewCrawlPage() {
       basicAuth: basicUser ? { username: basicUser, password: basicPassword } : null,
       viewports: widths,
       includeSubdomains,
+      onlyUnderStartPath,
       keepQueryParams: keepQuery,
       sampling: sampleMode === 'all' ? { mode: 'all' } : { mode: 'firstN', n: sampleN, prefixes: 'auto' },
       maxPages,
@@ -294,6 +297,16 @@ export function NewCrawlPage() {
         <section className={styles.section}>
           <span className={styles.label}>巡回の範囲</span>
           <label className={styles.choice}>
+            <input type="checkbox" checked={onlyUnderStartPath} onChange={(e) => setOnlyUnderStartPath(e.target.checked)} />
+            <span>
+              起点URLより下の階層だけを撮る
+              <p className={styles.hint}>
+                {startPathHint(url) ??
+                  '例: https://example.com/portfolio/abc なら、/portfolio/abc と /portfolio/abc/… だけを撮る。ほかの人のページやサイト全体は撮らない'}
+              </p>
+            </span>
+          </label>
+          <label className={styles.choice}>
             <input type="checkbox" checked={includeSubdomains} onChange={(e) => setIncludeSubdomains(e.target.checked)} />
             <span>
               サブドメインも巡回する
@@ -395,4 +408,17 @@ export function NewCrawlPage() {
       </form>
     </div>
   );
+}
+
+// 「起点URLより下の階層だけを撮る」の説明に、入力された URL で撮る範囲を示す（サーバーの startPathPrefix と同じ決め方）
+function startPathHint(url: string): string | null {
+  let path: string;
+  try {
+    path = new URL(url.trim()).pathname.replace(/\/+$/, '');
+  } catch {
+    return null;
+  }
+  if (/\/[^/]+\.[a-z0-9]+$/i.test(path)) path = path.replace(/\/[^/]+$/, '');
+  if (!path) return '起点URLがトップページなので、サイト全体が対象になります';
+  return `${path} と ${path}/… だけを撮ります。ほかのページはたどりません`;
 }

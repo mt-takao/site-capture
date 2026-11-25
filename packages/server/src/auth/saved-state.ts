@@ -9,7 +9,9 @@ type StorageState = Exclude<BrowserContextOptions['storageState'], string | unde
 
 export type SessionStorageByOrigin = Record<string, Array<[name: string, value: string]>>;
 
-export type SavedLoginState = StorageState & { sessionStorage?: SessionStorageByOrigin };
+// userAgent: ログインしたブラウザの User-Agent。ログインした状態をブラウザの種類（User-Agent）と結びつけるサイトがあり、
+// 撮影用のブラウザ（画面なし）は User-Agent が違うため、同じものを使って撮る（2026-11-26）
+export type SavedLoginState = StorageState & { sessionStorage?: SessionStorageByOrigin; userAgent?: string };
 
 export type SavedItemCounts = { cookies: number; localStorage: number; sessionStorage: number };
 
@@ -34,9 +36,11 @@ export function countSavedItems(state: SavedLoginState): SavedItemCounts {
   };
 }
 
-export async function readSavedLoginState(path: string): Promise<{ storageState: StorageState; sessionStorage: SessionStorageByOrigin }> {
-  const { sessionStorage, ...storageState } = JSON.parse(await readFile(path, 'utf8')) as SavedLoginState;
-  return { storageState, sessionStorage: sessionStorage ?? {} };
+export async function readSavedLoginState(
+  path: string,
+): Promise<{ storageState: StorageState; sessionStorage: SessionStorageByOrigin; userAgent?: string }> {
+  const { sessionStorage, userAgent, ...storageState } = JSON.parse(await readFile(path, 'utf8')) as SavedLoginState;
+  return { storageState, sessionStorage: sessionStorage ?? {}, userAgent: typeof userAgent === 'string' && userAgent ? userAgent : undefined };
 }
 
 // 撮影するページの sessionStorage に、保存した値を書き戻すスクリプト。ページのスクリプトより先に、オリジンが一致するページでだけ動く。

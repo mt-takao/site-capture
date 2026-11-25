@@ -26,6 +26,7 @@ export type CrawlSettings = {
   startUrl: string;
   viewports: number[]; // 画面幅
   includeSubdomains: boolean; // C-02
+  onlyUnderStartPath?: boolean; // C-02b 起点URLのパスより下だけを撮る（例: /portfolio/user/abc なら /portfolio/user/abc/…）
   keepQueryParams: boolean; // C-03a
   sampling: Sampling; // C-03b
   maxPages: number; // C-04
@@ -49,6 +50,7 @@ export function defaultCrawlSettings(startUrl: string): CrawlSettings {
     startUrl,
     viewports: [1440, 375],
     includeSubdomains: false,
+    onlyUnderStartPath: false,
     keepQueryParams: false,
     sampling: { mode: 'all' },
     maxPages: 200,

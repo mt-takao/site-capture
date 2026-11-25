@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { normalizeUrl } from '../src/crawler/normalize.js';
 import { loadRobots } from '../src/crawler/robots.js';
 import { Sampler, groupKey } from '../src/crawler/sampling.js';
-import { checkScope, isSameSite, matchesExcludePattern } from '../src/crawler/scope.js';
+import { checkScope, isSameSite, matchesExcludePattern, startPathPrefix } from '../src/crawler/scope.js';
 import { loadSitemapUrls, parseSitemap } from '../src/crawler/sitemap.js';
 import type { FetchText } from '../src/crawler/fetch-text.js';
 import { DEFAULT_EXCLUDE_PATTERNS } from '../src/crawler/types.js';
@@ -41,6 +41,23 @@ test('範囲判定: スキーム、除外パターン、HTML以外の拡張子',
   assert.equal(checkScope('https://other.com/', opts), 'host');
   assert.equal(checkScope('https://example.com/account/logout', opts), 'excluded');
   assert.equal(checkScope('https://example.com/files/a.PDF', opts), 'non-html-extension');
+});
+
+test('範囲判定: 起点URLより下の階層だけ（C-02b）', () => {
+  const opts = { startUrl: 'https://e.com/portfolio/user/abc', includeSubdomains: false, onlyUnderStartPath: true, excludePatterns: [] };
+  assert.equal(checkScope('https://e.com/portfolio/user/abc', opts), null);
+  assert.equal(checkScope('https://e.com/portfolio/user/abc/', opts), null);
+  assert.equal(checkScope('https://e.com/portfolio/user/abc/works/1', opts), null);
+  assert.equal(checkScope('https://e.com/portfolio/user/abcdef', opts), 'outside-start-path');
+  assert.equal(checkScope('https://e.com/gallery', opts), 'outside-start-path');
+  assert.equal(checkScope('https://e.com/', opts), 'outside-start-path');
+  // 選ばなければ、これまでどおりサイト全体
+  assert.equal(checkScope('https://e.com/gallery', { ...opts, onlyUnderStartPath: false }), null);
+  // 起点の末尾の / とファイル名は除いて考える。トップページが起点ならサイト全体
+  assert.equal(startPathPrefix('https://e.com/blog/'), '/blog');
+  assert.equal(startPathPrefix('https://e.com/docs/index.html'), '/docs');
+  assert.equal(startPathPrefix('https://e.com/'), '');
+  assert.equal(checkScope('https://e.com/anything', { ...opts, startUrl: 'https://e.com/' }), null);
 });
 
 test('除外パターン: * はワイルドカード、* なしは部分一致', () => {

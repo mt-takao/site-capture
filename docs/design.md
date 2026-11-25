@@ -4,7 +4,7 @@
 - 更新日: 2026-11-11
 - 元にした要件: [requirements.md](requirements.md) v1.3
 - 状態: 確定（未決事項はすべて回答済み。「11. 決定事項の記録」を参照）
-- 変更履歴: v1.1 で M0 技術検証の結果（[m0-findings.md](m0-findings.md)）を反映した。主な変更は 5.5（アクセス制限への対応）、6.2、6.4、6.5。v1.2 で M1 の実装結果を反映した（6.1、6.5、10章）。v1.3 で M2 の実装結果を反映した（4章、5章、10章）。v1.4 で M3 の実装結果を反映した（1.1、8章、9章、10章）。v1.5 で M4 の実装結果を反映した（7章、8章、10章）。v1.6 で M5 の実装結果を反映した（8章、9.4、10章）。v1.7 で M6 の実装結果を反映した（4章、6.6、8章、9.5、10章）。これで設計した機能はすべて実装した。v1.8 で、Notion の撮影で制限が続いた件を受けて、429 の判定と記録を改めた（5.5）。v1.9 で、sessionStorage に入室状態を置くサイトに対応した（7.1）。v2.0 で、要素を押してから撮る機能（J-10）を加えた（4章、6.7）
+- 変更履歴: v1.1 で M0 技術検証の結果（[m0-findings.md](m0-findings.md)）を反映した。主な変更は 5.5（アクセス制限への対応）、6.2、6.4、6.5。v1.2 で M1 の実装結果を反映した（6.1、6.5、10章）。v1.3 で M2 の実装結果を反映した（4章、5章、10章）。v1.4 で M3 の実装結果を反映した（1.1、8章、9章、10章）。v1.5 で M4 の実装結果を反映した（7章、8章、10章）。v1.6 で M5 の実装結果を反映した（8章、9.4、10章）。v1.7 で M6 の実装結果を反映した（4章、6.6、8章、9.5、10章）。これで設計した機能はすべて実装した。v1.8 で、Notion の撮影で制限が続いた件を受けて、429 の判定と記録を改めた（5.5）。v1.9 で、sessionStorage に入室状態を置くサイトに対応した（7.1）。v2.0 で、要素を押してから撮る機能（J-10）を加えた（4章、6.7）。v2.1 で、ログインしたブラウザの User-Agent も保存するようにした（7.1）。v2.2 で、起点URLより下の階層だけを撮る設定（C-02b）を加えた（4.1、5.3）
 
 ---
 
@@ -160,6 +160,7 @@ type CrawlSettings = {
   startUrl: string;
   viewports: number[];               // [1440, 375]
   includeSubdomains: boolean;        // C-02  初期値 false
+  onlyUnderStartPath?: boolean;      // C-02b 初期値 false。起点URLのパスより下だけを撮る（5.3）
   keepQueryParams: boolean;          // C-03a 初期値 false
   sampling: { mode: 'all' } | { mode: 'firstN'; n: number; prefixes: string[] | 'auto' }; // C-03b
   maxPages: number;                  // C-04  初期値 200
@@ -254,10 +255,11 @@ M2 で決めた細かい点:
 
 1. スキームが `http` か `https`
 2. ホストが起点と同じ。`includeSubdomains` が true なら、起点の登録ドメイン（例: `example.com`）の配下も可
-3. 除外パターン（`excludePatterns`）に当てはまらない。初期値は `logout`、`signout`、`sign-out`、`delete`、`destroy`
-4. 拡張子が明らかにHTML以外（`.pdf`、`.jpg`、`.zip` など）ではない
-5. `respectRobotsTxt` が true なら、robots.txt で禁止されていない
-6. 階層が `maxDepth` 以下
+3. `onlyUnderStartPath` が true なら、パスが起点URLのパスそのものか、その下にある（v2.2）。起点が `/portfolio/user/abc` なら `/portfolio/user/abc` と `/portfolio/user/abc/…` だけを撮り、`/portfolio/user/abcdef` は含めない。起点のパスの末尾がファイル名（例: `/docs/index.html`）ならそのフォルダ（`/docs`）を基準にする。サイトマップから集めたURLにも同じ判定をかける。ポートフォリオ作成サービスのように、大きなサイトの一部だけを撮りたい場合のため（2026-11-26、brik.co.jp の個人ポートフォリオを撮ると、サイトマップからサイト全体の 1,570 ページを集めてしまった）
+4. 除外パターン（`excludePatterns`）に当てはまらない。初期値は `logout`、`signout`、`sign-out`、`delete`、`destroy`
+5. 拡張子が明らかにHTML以外（`.pdf`、`.jpg`、`.zip` など）ではない
+6. `respectRobotsTxt` が true なら、robots.txt で禁止されていない
+7. 階層が `maxDepth` 以下
 
 HTML以外かどうかは、実際に開いたときの `Content-Type` でも確かめる。HTMLでなければ `skipped` にする（C-10）。PDF などブラウザがダウンロードとして扱うものも同じ扱いにする。
 
@@ -471,6 +473,7 @@ DOM の変化も、同じ要素が5回を超えて変化した場合はその要
 
 - アプリはパスワードを入力も保存もしない（L-02）
 - **sessionStorage も保存する**（v1.9）: Playwright の storageState は Cookie と localStorage しか対象にしない。入室した状態を sessionStorage にだけ置くサイトがあり（2026-11-10、パスワードで保護されたポートフォリオサイトで、保存したログイン状態が空になりログイン後の画面が撮れなかった）、保存のときに開いているすべてのタブの sessionStorage をオリジンごとに集めて、同じファイルに `sessionStorage` として入れる（`auth/saved-state.ts`）
+- **ログインしたブラウザの User-Agent も保存する**（v2.1）: ログインした状態をブラウザの種類（User-Agent）と結びつけるサイトがある（2026-11-26、FuelPHP で作られたポートフォリオサイトで、保存したログイン状態を使ってもログイン画面に転送された。FuelPHP のセッションは初期設定で User-Agent が変わると無効になる）。ログイン用ブラウザは画面あり（`Chrome/…`）、撮影用は画面なし（`HeadlessChrome/…`）で User-Agent が違うため、保存のときにログイン用ブラウザの User-Agent を `userAgent` として同じファイルに入れ、撮影ではそれを使う。これより前に保存したログイン状態には入っていないので、作り直す
   - 撮影のときは、Playwright には Cookie と localStorage の分だけを渡し、sessionStorage はページのスクリプトより先に動くスクリプト（`addInitScript`）で、オリジンが一致するページにだけ書き戻す。ページ側がすでに値を持っていれば上書きしない
   - IndexedDB やページ内の変数（JavaScript のメモリ上）にだけ入室状態を置くサイトは、引き続き撮れない
 - **保存した件数を知らせる**（v1.9）: 保存したときに Cookie・localStorage・sessionStorage の件数を返す。どれも 0 件なら、設定画面に「ログイン後の状態が何も見つかりませんでした」と警告する（保存はする）

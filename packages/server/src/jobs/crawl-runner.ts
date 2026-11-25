@@ -280,6 +280,15 @@ export class CrawlRunner {
     this.emit({ type: 'page-found', pageId, url: url.href, depth });
     if (skipReason) {
       this.emit({ type: 'page-skipped', pageId, reason: skipReason });
+      // 起点のページが robots.txt で禁止されていると、何も撮らずに終わる。理由と撮る方法が分かるように知らせる
+      if (skipReason === 'robots' && depth === 0 && fromPageId == null) {
+        this.emit({
+          type: 'warning',
+          message:
+            '起点のページがサイトの robots.txt で禁止されているため、開かずに飛ばしました。' +
+            '撮影の許可がある場合は、撮影設定の「robots.txt で禁止されたページは撮らない」を外して撮り直してください。',
+        });
+      }
       return;
     }
     this.admitted++;
