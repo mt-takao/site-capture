@@ -21,7 +21,8 @@ export type ShotRecord = {
 
 // J-10: 押してから撮る要素。CSS セレクタ（selector）か文字列（text）に当てはまる「見えている要素」のうち、
 // 何番目か（index、0 から）で指す。no はそのページの中での通し番号（1 から）。ファイル名と、撮影結果の中での区別に使う
-export type ClickTarget = { selector?: string; text?: string; index: number; no: number; label: string };
+// images が true なら、押せる画像（サムネイルなど）のうち何番目か
+export type ClickTarget = { selector?: string; text?: string; images?: boolean; index: number; no: number; label: string };
 
 export type CapturePageResult = {
   url: string;

@@ -35,21 +35,73 @@ export type OpenedDialog = {
   scrollable: boolean; // ダイアログの中にスクロールする要素があるか（あれば DIALOG_SCROLLER_ATTR を付けてある）
 };
 
-function describeTarget(t: Pick<ClickTarget, 'selector' | 'text'>): string {
-  return t.text != null ? `「${t.text}」` : (t.selector ?? '');
+function describeTarget(t: Pick<ClickTarget, 'selector' | 'text' | 'images'>): string {
+  return t.images ? '押せる画像' : t.text != null ? `「${t.text}」` : (t.selector ?? '');
 }
 
 // 押す要素の候補を探すスクリプト。集めるときと押すときで同じ探し方をするよう、ページに1つだけ置いて使う。
 // selector: CSS セレクタに当てはまる見えている要素。
 // text: その文字列を含むいちばん内側の要素を探し、押せる要素（リンク・ボタンなど）まで上にたどったもの。
-// ラベルは、押す要素の中の見出し → 要素の近くの見出し → aria-label → 文字列 の順に決める
-const FIND_CLICKABLES_SCRIPT = `window.__scFindClickables = ({ selector, text }) => {
+// images: 押せる画像（マウスを乗せると指の形になる、ある程度大きな画像や背景画像）。別のページへのリンクは除く（巡回で撮るため）。
+// ラベルは、押す要素の中の見出し → 要素の近くの見出し → 画像の alt → aria-label → 文字列 の順に決める
+const FIND_CLICKABLES_SCRIPT = `window.__scFindClickables = ({ selector, text, images }) => {
   const visible = (el) => {
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden' && !el.closest('dialog:not([open])');
   };
   const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
   if (selector != null) return Array.from(document.querySelectorAll(selector)).filter(visible);
+  if (images) {
+    const MIN_W = 80, MIN_H = 60; // これより小さい画像はアイコンとみなして押さない
+    const here = location.href.split('#')[0];
+    const out = [];
+    for (const el of Array.from(document.body.querySelectorAll('*'))) {
+      if (el.closest('dialog:not([open])')) continue;
+      const isImage =
+        el.tagName === 'IMG' || el.tagName === 'PICTURE' || el.tagName === 'VIDEO' ||
+        /url\\(/.test(getComputedStyle(el).backgroundImage);
+      if (!isImage) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < MIN_W || r.height < MIN_H) continue;
+      // 押せる要素（リンク・ボタン・マウスを乗せると指の形になる要素）まで、5段まで上にたどる
+      let target = null;
+      for (let n = el, i = 0; n && n !== document.body && i < 6; n = n.parentElement, i++) {
+        if (n.matches('a[href], button, [role="button"], [role="link"], [onclick]') || getComputedStyle(n).cursor === 'pointer') {
+          target = n;
+          // 指の形は子に引き継がれるので、指の形になるいちばん外側の要素（押す範囲の全体）まで上る
+          for (let p = n.parentElement, j = 0; p && p !== document.body && j < 4; p = p.parentElement, j++) {
+            if (getComputedStyle(p).cursor !== 'pointer' || p.querySelectorAll('img, picture, video').length > 1) break;
+            target = p;
+          }
+          break;
+        }
+      }
+      if (!target) continue;
+      const link = target.closest('a[href]');
+      if (link) {
+        const href = link.href.split('#')[0];
+        if (/^https?:/.test(link.href) && href !== here) continue;
+      }
+      if (!visible(target) || out.includes(target)) continue;
+      out.push(target);
+    }
+    // 画像が Shadow DOM や SVG の中に描かれていて見つからないサイト向けに、文字のない大きなボタン（サムネイルにあたるもの）も押す
+    const isPointer = (n) => !!n && getComputedStyle(n).cursor === 'pointer';
+    for (const el of Array.from(document.body.querySelectorAll('a, button, [role="button"], [role="link"], [onclick], *'))) {
+      const clickable = el.matches('a[href], button, [role="button"], [role="link"], [onclick]') || (isPointer(el) && !isPointer(el.parentElement));
+      if (!clickable || el.closest('dialog:not([open])')) continue;
+      if (out.some((o) => o === el || o.contains(el) || el.contains(o))) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < MIN_W || r.height < MIN_H) continue;
+      if (/[\\p{L}\\p{N}]/u.test(norm(el.innerText))) continue;
+      const link = el.closest('a[href]');
+      if (link && /^https?:/.test(link.href) && link.href.split('#')[0] !== here) continue;
+      if (!visible(el)) continue;
+      out.push(el);
+    }
+    // 文書の中の順に並べる（押す順番と番号が、撮るたびに変わらないように）
+    return out.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+  }
   const needle = norm(text);
   if (!needle) return [];
   const out = [];
@@ -119,22 +171,37 @@ window.__scClickLabel = (el, searchText) => {
       }
     }
   }
+  if (!label) {
+    // 画像を押す場合: 画像の alt、なければ画像を1つだけ含む範囲（カード）の見出しを名前にする
+    const img = el.querySelector('img[alt]') || (el.matches('img[alt]') ? el : null);
+    label = norm(img?.getAttribute('alt'));
+    for (let n = el.parentElement, i = 0; !label && n && n !== document.body && i < 4; n = n.parentElement, i++) {
+      // ほかの画像やボタンも含む範囲まで広げると、別の項目や一覧全体の見出しを拾うので、そこで止める
+      if (n.querySelectorAll('img, picture, video, button, a[href]').length > 1) break;
+      label = norm(headings(n)[0]?.textContent);
+    }
+  }
   label = label || norm(el.getAttribute('aria-label')) || norm(el.getAttribute('title')) || norm(el.textContent) || norm(searchText);
   return cut(label);
 };`;
 
 // サイト設定の clickSelectors と clickByText に当てはまる、見えている要素を集める。押す前（ふつうのページの撮影中）に呼ぶ
-export async function findClickTargets(page: Page, selectors: string[], texts: string[] = []): Promise<ClickTarget[]> {
-  if (selectors.length === 0 && texts.length === 0) return [];
+export async function findClickTargets(
+  page: Page,
+  selectors: string[],
+  texts: string[] = [],
+  images = false,
+): Promise<ClickTarget[]> {
+  if (selectors.length === 0 && texts.length === 0 && !images) return [];
   await page.evaluate(FIND_CLICKABLES_SCRIPT);
   return page.evaluate(
     ({ queries, max }) => {
       const w = window as unknown as {
-        __scFindClickables: (q: { selector?: string; text?: string }) => Element[];
+        __scFindClickables: (q: { selector?: string; text?: string; images?: boolean }) => Element[];
         __scClickLabel: (el: Element, text?: string) => string;
       };
       const seen = new Set<Element>();
-      const out: Array<{ selector?: string; text?: string; index: number; no: number; label: string }> = [];
+      const out: Array<{ selector?: string; text?: string; images?: boolean; index: number; no: number; label: string }> = [];
       for (const q of queries) {
         let els: Element[];
         try {
@@ -145,15 +212,16 @@ export async function findClickTargets(page: Page, selectors: string[], texts: s
         els.forEach((el, index) => {
           if (seen.has(el) || out.length >= max) return;
           seen.add(el);
-          out.push({ ...q, index, no: out.length + 1, label: w.__scClickLabel(el, q.text) || `${index + 1} 番目` });
+          out.push({ ...q, index, no: out.length + 1, label: w.__scClickLabel(el, q.text) || (q.images ? `画像 ${index + 1}` : `${index + 1} 番目`) });
         });
       }
       return out;
     },
     {
       queries: [
-        ...selectors.map((selector): { selector?: string; text?: string } => ({ selector })),
-        ...texts.map((text): { selector?: string; text?: string } => ({ text })),
+        ...selectors.map((selector): { selector?: string; text?: string; images?: boolean } => ({ selector })),
+        ...texts.map((text): { selector?: string; text?: string; images?: boolean } => ({ text })),
+        ...(images ? [{ images: true }] : []),
       ],
       max: MAX_CLICK_STATES_PER_PAGE,
     },
@@ -165,7 +233,7 @@ export async function openClickTarget(page: Page, target: ClickTarget): Promise<
   await page.evaluate(FIND_CLICKABLES_SCRIPT);
   const found = await page.evaluate(
     ({ query, index, attr }) => {
-      const w = window as unknown as { __scFindClickables: (q: { selector?: string; text?: string }) => Element[] };
+      const w = window as unknown as { __scFindClickables: (q: { selector?: string; text?: string; images?: boolean }) => Element[] };
       document.querySelectorAll(`[${attr}]`).forEach((el) => el.removeAttribute(attr));
       const el = w.__scFindClickables(query)[index];
       if (!el) return false;
@@ -173,7 +241,7 @@ export async function openClickTarget(page: Page, target: ClickTarget): Promise<
       return true;
     },
     {
-      query: target.text != null ? { text: target.text } : { selector: target.selector },
+      query: target.images ? { images: true } : target.text != null ? { text: target.text } : { selector: target.selector },
       index: target.index,
       attr: CLICK_TARGET_ATTR,
     },
@@ -181,6 +249,8 @@ export async function openClickTarget(page: Page, target: ClickTarget): Promise<
   if (!found) throw new ClickTargetNotFoundError(target);
 
   const before = withoutHash(page.url());
+  // 押した後に URL が変わっても、同じ文書のまま（History API で URL だけ変える SPA）なら撮る。別の文書に移ったら撮らない
+  await page.evaluate(() => ((window as unknown as { __scClickMarker?: boolean }).__scClickMarker = true));
   const locator = page.locator(`[${CLICK_TARGET_ATTR}]`).first();
   try {
     // 実際のマウス操作で押す（ページ側が document でクリックを受け取る作りでも動くように）
@@ -192,7 +262,12 @@ export async function openClickTarget(page: Page, target: ClickTarget): Promise<
 
   const startedAt = Date.now();
   while (true) {
-    if (withoutHash(page.url()) !== before) throw new ClickNavigatedError(page.url());
+    if (withoutHash(page.url()) !== before) {
+      const sameDocument = await page
+        .evaluate(() => (window as unknown as { __scClickMarker?: boolean }).__scClickMarker === true)
+        .catch(() => false);
+      if (!sameDocument) throw new ClickNavigatedError(page.url());
+    }
     const dialog = await findOpenDialog(page);
     if (dialog || Date.now() - startedAt >= DIALOG_APPEAR_MAX_MS) return dialog;
     await page.waitForTimeout(100);
@@ -357,4 +432,60 @@ export async function undoExpandFixedDialog(page: Page): Promise<void> {
 function withoutHash(url: string): string {
   const i = url.indexOf('#');
   return i === -1 ? url : url.slice(0, i);
+}
+
+// 押せる画像が見つからなかったときに、原因を調べるための記録を作る（ターミナルに出す）。
+// ある程度大きな画像・背景画像・canvas・iframe について、大きさ、マウスを乗せたときの形、リンクかどうか、近くの要素のクラスを集める
+export async function describeImagesForDebug(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const lines: string[] = [];
+    const desc = (n: Element) => {
+      const cls = typeof (n as HTMLElement).className === 'string' ? (n as HTMLElement).className.trim().split(/\s+/).slice(0, 3).join('.') : '';
+      return `${n.tagName.toLowerCase()}${n.id ? `#${n.id}` : ''}${cls ? `.${cls}` : ''}`;
+    };
+    for (const el of Array.from(document.body.querySelectorAll('*'))) {
+      const tag = el.tagName;
+      const cs = getComputedStyle(el);
+      const isMedia = ['IMG', 'PICTURE', 'VIDEO', 'CANVAS', 'IFRAME', 'SVG'].includes(tag.toUpperCase()) || /url\(/.test(cs.backgroundImage);
+      if (!isMedia) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 80 || r.height < 60) continue;
+      const chain: string[] = [];
+      let pointer = '';
+      for (let n: Element | null = el, i = 0; n && n !== document.body && i < 6; n = n.parentElement, i++) {
+        chain.push(desc(n));
+        if (!pointer && getComputedStyle(n).cursor === 'pointer') pointer = desc(n);
+      }
+      const link = el.closest('a[href]') as HTMLAnchorElement | null;
+      lines.push(
+        `${Math.round(r.width)}x${Math.round(r.height)} @y=${Math.round(r.top + window.scrollY)} opacity=${cs.opacity} cursor=${cs.cursor}` +
+          `${pointer ? ` 指の形=${pointer}` : ''}${link ? ` link=${link.getAttribute('href')}` : ''} [${chain.join(' < ')}]`,
+      );
+      if (lines.length >= 40) break;
+    }
+    // 大きな画像が見つからない場合に備えて、ページ全体の作りも記録する（iframe、Shadow DOM、canvas の中に描かれていると見つからない）
+    const all = Array.from(document.querySelectorAll('*'));
+    const count = (sel: string) => document.querySelectorAll(sel).length;
+    const sized = (sel: string) =>
+      Array.from(document.querySelectorAll(sel))
+        .slice(0, 8)
+        .map((n) => {
+          const r = n.getBoundingClientRect();
+          return `${desc(n)} ${Math.round(r.width)}x${Math.round(r.height)} pos=${getComputedStyle(n).position}`;
+        });
+    lines.push(
+      `要素 ${all.length} 個 / img ${count('img')} / picture ${count('picture')} / video ${count('video')} / canvas ${count('canvas')} / iframe ${count('iframe')} / svg ${count('svg')} / Shadow DOM ${all.filter((n) => n.shadowRoot).length}`,
+    );
+    for (const line of [...sized('canvas'), ...sized('iframe'), ...sized('img')]) lines.push(`  ${line}`);
+    // 指の形は子に引き継がれるので、親が指の形でない（押す範囲のいちばん外側の）要素だけを数える
+    const isPointer = (n: Element | null) => !!n && getComputedStyle(n).cursor === 'pointer';
+    const pointers = all.filter((n) => isPointer(n) && !isPointer(n.parentElement));
+    lines.push(`指の形になる要素 ${pointers.length} 個`);
+    for (const n of pointers.slice(0, 25)) {
+      const r = n.getBoundingClientRect();
+      lines.push(`  ${desc(n)} ${Math.round(r.width)}x${Math.round(r.height)} @y=${Math.round(r.top + window.scrollY)} 文字=${(n.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 30)}`);
+    }
+    lines.push(`body の直下: ${Array.from(document.body.children).map(desc).join(', ')}`);
+    return lines;
+  });
 }

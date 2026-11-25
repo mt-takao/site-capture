@@ -33,6 +33,17 @@
   <section class="works">
     <button class="row"><span>04</span><span style="font-size:24px">Store analytics</span><span>説明の文</span><span>View details ↗</span></button>
   </section>
+  <!-- 押すと詳細が開くサムネイル画像（ボタンも文字もない作り）と、押さない画像 -->
+  <section class="thumbs">
+    <div class="thumb" data-thumb="a" style="cursor:pointer;display:inline-block"><img alt="製造業のサムネイル" width="200" height="120" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='120'%3E%3Crect width='200' height='120' fill='%23468'/%3E%3C/svg%3E"></div>
+    <div class="thumb" data-thumb="b" style="cursor:pointer;display:inline-block;width:200px;height:120px;background-image:url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%222%22 height=%222%22%3E%3Crect width=%222%22 height=%222%22 fill=%22%23864%22/%3E%3C/svg%3E')"><h4>小売業</h4></div>
+    <!-- 絵を Shadow DOM の中の SVG で描いた、文字のないボタン。押すと URL だけが変わり（History API）、詳細に切り替わる -->
+    <button class="shadow-thumb" style="width:200px;height:120px;padding:0;border:0"><span class="shadow-host" style="display:block"></span></button>
+    <!-- 押さない: 小さなアイコン、別のページへのリンク、押せない画像 -->
+    <img class="icon" style="cursor:pointer" alt="アイコン" width="20" height="20" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/%3E">
+    <a href="/long-static.html"><img alt="別のページ" width="200" height="120" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='120'/%3E"></a>
+    <img alt="飾りの画像" width="200" height="120" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='120'/%3E">
+  </section>
   <!-- ページの下のほう（押すにはスクロールが要る）にある、div で作ったモーダルを開くボタン -->
   <div style="height:1600px"></div>
   <button class="card" id="open-modal"><h3>下のほうの事例</h3></button>
@@ -46,16 +57,26 @@
 <dialog id="case-dialog" aria-labelledby="case-title">
   <div class="case-body" id="case-content"></div>
 </dialog>
+<div id="spa-detail" hidden style="height:1500px">シャドウの作品の詳細</div>
 <script>
+  const host = document.querySelector('.shadow-thumb');
+  host.querySelector('.shadow-host').attachShadow({ mode: 'open' }).innerHTML =
+    '<svg width="200" height="120"><rect width="200" height="120" fill="#684"/></svg>';
+  host.addEventListener('click', () => {
+    history.pushState({}, '', '/works/shadow');
+    document.title = 'シャドウの作品';
+    document.querySelector('main').hidden = true;
+    document.getElementById('spa-detail').hidden = false;
+  });
   const cases = { a: '事例A：製造業の知識共有', b: '事例B：小売業の在庫管理' };
   const dialog = document.getElementById('case-dialog');
   document.addEventListener('click', (e) => {
-    const button = e.target.closest('[data-case]');
+    const button = e.target.closest('[data-case]') || e.target.closest('[data-thumb]');
     if (button) {
       // 開くまでに少し時間がかかるダイアログ
       setTimeout(() => {
         document.getElementById('case-content').innerHTML =
-          `<h2 id="case-title">${cases[button.dataset.case]}</h2>` +
+          `<h2 id="case-title">${cases[button.dataset.case ?? button.dataset.thumb]}</h2>` +
           Array.from({ length: 6 }, (_, i) => `<section>セクション ${i + 1}</section>`).join('') +
           '<p id="case-end">事例の終わり</p>';
         dialog.showModal();

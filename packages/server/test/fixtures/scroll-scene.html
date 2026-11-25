@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>スクロールで切り替わるページ</title>
+<style>
+  body { margin: 0; }
+  /* 画面の上に固定された低いヘッダー（つなぎ合わせたときに何度も写らないこと） */
+  header { position: fixed; top: 0; left: 0; right: 0; height: 40px; background: rgb(0, 0, 200); z-index: 2; }
+  /* スクロールの間だけ画面に留まる場面。スクロール位置に合わせて色が変わる */
+  #runway { height: 3000px; }
+  #scene { position: sticky; top: 0; height: 100vh; background: rgb(200, 0, 0); }
+  /* 場面の左半分に、上から3色の帯を置く（つなぎ目で場面の中身が2回写らないことを確かめる） */
+  #bands { width: 50%; height: 100%; display: flex; flex-direction: column; }
+  #bands div { flex: 1; }
+  footer { height: 400px; background: rgb(240, 240, 240); }
+</style>
+</head>
+<body>
+<header></header>
+<section id="runway"><div id="scene"><div id="bands"><div style="background:rgb(250,150,0)"></div><div style="background:rgb(120,0,160)"></div><div style="background:rgb(0,0,0)"></div></div></div></section>
+<footer>おわり</footer>
+<script>
+  const scene = document.getElementById('scene');
+  window.addEventListener('scroll', () => {
+    scene.style.background = window.scrollY > 300 ? 'rgb(0, 160, 0)' : 'rgb(200, 0, 0)';
+  });
+</script>
+</body>
+</html>

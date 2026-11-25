@@ -164,6 +164,29 @@ describe('要素を押してから撮る（J-10）', () => {
     for (const [i, s] of opened.shots.entries()) assert.ok(s.imageHeight > r.shots[i]!.imageHeight + 100, `${s.viewportWidth}px`);
   });
 
+  test('押せる画像を押す: 指の形になる大きな画像だけを押し、alt か見出しを名前にする', async () => {
+    const r = await capture('/dialog.html', { ...DEFAULT_SITE_SETTINGS, clickImages: true }, 'dialog-images');
+    // 小さなアイコン、別のページへのリンク、押せない画像は含めない
+    assert.deepEqual(
+      r.clickTargets.map((t) => [t.no, t.images, t.index, t.label]),
+      [
+        [1, true, 0, '製造業のサムネイル'],
+        [2, true, 1, '小売業'],
+        // 絵が Shadow DOM の中にある、文字のないボタン
+        [3, true, 2, '画像 3'],
+      ],
+    );
+    const opened = await capturePageWithClick('/dialog.html', r.clickTargets[1]!, 'dialog-image-2');
+    assert.equal(opened.title, '事例B：小売業の在庫管理');
+    assert.ok(opened.shots.every((s) => s.method === 'expand' && s.imageHeight > 2400));
+
+    // 押すと URL だけが変わる（同じ文書のまま詳細に切り替わる）場合は、別のページへの移動とみなさずに撮り、ページの題名を使う
+    const routed = await capturePageWithClick('/dialog.html', r.clickTargets[2]!, 'dialog-image-3');
+    assert.equal(routed.title, 'シャドウの作品');
+    assert.match(routed.finalUrl, /\/works\/shadow$/);
+    assert.ok(routed.shots.every((s) => s.imageHeight >= 1500));
+  });
+
   test('div で作ったモーダルでも、背景の幕と閉じるボタンがダイアログとずれずに写る', async () => {
     const r = await capturePageWithClick('/dialog.html', { selector: '#open-modal', index: 0, no: 1, label: '下のほうの事例' }, 'dialog-div');
     assert.equal(r.title, '下のほうの事例の詳細');
@@ -193,7 +216,7 @@ describe('要素を押してから撮る（J-10）', () => {
 
 async function capturePageWithClick(
   path: string,
-  click: { selector?: string; text?: string; index: number; no: number; label: string },
+  click: { selector?: string; text?: string; images?: boolean; index: number; no: number; label: string },
   outName: string,
   site: Partial<SiteSettings> = {},
 ) {
@@ -339,6 +362,70 @@ describe('失敗の扱い', () => {
     await context.close();
     assert.equal(r.shots.length, 2);
     assert.ok(logs.some((m) => m.includes('CSS を差し込めませんでした')));
+  });
+
+  test('ほかのサイトを埋め込んだ iframe が画面の外にあっても、白くならずに写る', async () => {
+    const r = await capture('/cross-site-iframe.html', DEFAULT_SITE_SETTINGS, 'cross-site-iframe');
+    for (const s of r.shots) {
+      const { data, info } = await sharp(s.filePath).raw().toBuffer({ resolveWithObject: true });
+      const i = (1700 * info.width + 100) * info.channels;
+      assert.deepEqual(Array.from(data.subarray(i, i + 3)), [220, 30, 30], `${s.viewportWidth}px`);
+    }
+  });
+
+  test('スクロールに合わせて表示が変わるページは、スクロールしながら撮ってつなぐと、途中の場面も写る', async () => {
+    const column = async (file: string, x: 'left' | 'right') => {
+      const { data, info } = await sharp(file).raw().toBuffer({ resolveWithObject: true });
+      const px = x === 'left' ? 10 : info.width - 10;
+      return (y: number) => {
+        const i = (y * info.width + px) * info.channels;
+        return Array.from(data.subarray(i, i + 3)).join(',');
+      };
+    };
+    const GREEN = '0,160,0';
+    const BANDS = ['250,150,0', '120,0,160', '0,0,0'];
+    // ふつうの撮り方では、先頭の状態のまま写り、途中は空白になる
+    const plain = await capture('/scroll-scene.html', DEFAULT_SITE_SETTINGS, 'scroll-scene-plain');
+    for (const s of plain.shots) assert.notEqual((await column(s.filePath, 'right'))(2000), GREEN, `${s.viewportWidth}px`);
+
+    const r = await capture('/scroll-scene.html', { ...DEFAULT_SITE_SETTINGS, scrollStitch: true }, 'scroll-scene');
+    for (const s of r.shots) {
+      const vh = viewports.find((v) => v.width === s.viewportWidth)!.height;
+      const label = `${s.viewportWidth}px`;
+      assert.equal(s.method, 'stitch');
+      const right = await column(s.filePath, 'right');
+      const left = await column(s.filePath, 'left');
+      // 途中の場面は切り替わった後の色で写る
+      assert.equal(right(vh + vh / 2), GREEN, label);
+      // 低い固定のヘッダーは最初の1画面だけに写る
+      assert.equal(right(10), '0,0,200', label);
+      assert.notEqual(right(vh + 10), '0,0,200', label);
+      // 最後はページの末尾まで写る
+      assert.equal(right(s.imageHeight - 10), '240,240,240', label);
+      // 場面の帯は、上から3色の順に繰り返して写り、途中で順番が崩れない（つなぎ目で場面の中身が2回写らない）
+      const runs: string[] = [];
+      for (let y = 50; y < s.imageHeight - 450; y += 4) {
+        const c = left(y);
+        if (BANDS.includes(c) && runs[runs.length - 1] !== c) runs.push(c);
+      }
+      for (let k = 0; k < runs.length; k++) assert.equal(runs[k], BANDS[k % 3], `${label}: ${runs.join(' / ')}`);
+      assert.equal(runs.length % 3, 0, `${label}: ${runs.join(' / ')}`);
+    }
+  });
+
+  test('なめらかにスクロールするページも、中身が追いついてから撮るので、つなぎ目がずれない', async () => {
+    const colors = [[200, 0, 0], [0, 160, 0], [0, 0, 200], [200, 200, 0], [0, 200, 200], [200, 0, 200]];
+    const r = await capture('/smooth-scroll.html', { ...DEFAULT_SITE_SETTINGS, scrollStitch: true }, 'smooth-scroll');
+    for (const s of r.shots) {
+      const { data, info } = await sharp(s.filePath).raw().toBuffer({ resolveWithObject: true });
+      for (let i = 0; i < colors.length; i++) {
+        // 各色の帯の上端近く・真ん中・下端近くが、その色で写っている
+        for (const y of [i * 500 + 20, i * 500 + 250, i * 500 + 480]) {
+          const p = (y * info.width + 10) * info.channels;
+          assert.deepEqual(Array.from(data.subarray(p, p + 3)), colors[i], `${s.viewportWidth}px y=${y}`);
+        }
+      }
+    }
   });
 
   test('HTML 以外は撮らない', async () => {

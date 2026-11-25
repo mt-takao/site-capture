@@ -19,6 +19,8 @@ type Draft = {
   reloadPerViewport: boolean;
   clickSelectors: string;
   clickByText: string;
+  clickImages: boolean;
+  scrollStitch: boolean;
   concurrency: string;
   intervalMs: string;
 };
@@ -39,6 +41,8 @@ function toDraft(s: SiteSettings, id: string | null): Draft {
     reloadPerViewport: s.reloadPerViewport,
     clickSelectors: (s.clickSelectors ?? []).join('\n'),
     clickByText: (s.clickByText ?? []).join('\n'),
+    clickImages: s.clickImages ?? false,
+    scrollStitch: s.scrollStitch ?? false,
     concurrency: s.concurrency == null ? '' : String(s.concurrency),
     intervalMs: s.intervalMs == null ? '' : String(s.intervalMs),
   };
@@ -57,6 +61,8 @@ function fromDraft(d: Draft): SiteSettings {
     reloadPerViewport: d.reloadPerViewport,
     clickSelectors: lines(d.clickSelectors),
     clickByText: lines(d.clickByText),
+    clickImages: d.clickImages,
+    scrollStitch: d.scrollStitch,
     concurrency: d.concurrency === '' ? undefined : Number(d.concurrency),
     intervalMs: d.intervalMs === '' ? undefined : Number(d.intervalMs),
   };
@@ -171,6 +177,10 @@ export function SiteSettingsSection() {
               その文字列を含むリンク・ボタンを1つずつ押し、開いた画面を元のページとは別の画像として撮ります。サイトの作りを調べなくても指定できます
             </span>
           </label>
+          <label className={styles.check}>
+            <input type="checkbox" checked={draft.clickImages} onChange={(e) => set('clickImages', e.target.checked)} />
+            押せる画像（サムネイルなど）を押して撮る（ボタンがなく、画像を押すと詳細が開くサイト向け。別のページへのリンクと小さなアイコンは押しません）
+          </label>
           <label className={styles.field}>
             押してから撮る要素（CSS セレクタ、1行に1つ）
             <textarea className="input mono" rows={2} value={draft.clickSelectors} onChange={(e) => set('clickSelectors', e.target.value)} placeholder={'[data-case]\nbutton[aria-haspopup="dialog"]'} />
@@ -182,6 +192,10 @@ export function SiteSettingsSection() {
             撮影前に実行するスクリプト（JavaScript）
             <textarea className="input" rows={5} value={draft.beforeCaptureScript} onChange={(e) => set('beforeCaptureScript', e.target.value)} placeholder="document.querySelector('.modal-close')?.click();" />
             <span className={styles.note}>ページを開いて表示が落ち着いた後に、そのページの中で実行します。await も使えます</span>
+          </label>
+          <label className={styles.check}>
+            <input type="checkbox" checked={draft.scrollStitch} onChange={(e) => set('scrollStitch', e.target.checked)} />
+            スクロールしながら1画面ずつ撮ってつなぐ（スクロールに合わせて表示が変わり、ページ全体を1枚で撮ると空白が写るサイト向け。撮影に時間がかかります）
           </label>
           <label className={styles.check}>
             <input type="checkbox" checked={!draft.reloadPerViewport} onChange={(e) => set('reloadPerViewport', !e.target.checked)} />

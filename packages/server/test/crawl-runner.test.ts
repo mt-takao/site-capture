@@ -137,13 +137,13 @@ test('サイト設定の「押してから撮る要素」を、元のページ�
     const runner = new CrawlRunner({
       store,
       browser,
-      settings: { ...settings(), startUrl: `${fixtures.origin}/dialog.html`, useSitemap: false, siteSettingsId: site.id },
+      settings: { ...settings(), startUrl: `${fixtures.origin}/dialog.html`, useSitemap: false, maxDepth: 0, siteSettingsId: site.id },
       outputDir: join(dir, 'click'),
     });
     assert.equal(await runner.run(), 'done');
     const pages = store.listPages(runner.crawlId);
     const row = (suffix: string) => pages.find((p) => p.normalized_url.endsWith(suffix))!;
-    // 元のページ（リンクはない）と、押して撮った 3 つ
+    // 元のページ（リンク先は最大階層 0 で撮らない）と、押して撮った 3 つ
     assert.equal(pages.length, 4);
     assert.equal(row('/dialog.html').status, 'done');
     assert.equal(row('#click-1').status, 'done');

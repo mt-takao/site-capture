@@ -5,6 +5,7 @@ import { sessionStorageInitScript, type SessionStorageByOrigin } from '../auth/s
 import { BlockedError, classifyRateLimited, detectBlocked, waitForRecovery } from './blocked.js';
 import {
   DIALOG_SCROLLER_ATTR,
+  describeImagesForDebug,
   expandFixedDialog,
   findClickTargets,
   fitDialogSpacer,
@@ -23,9 +24,19 @@ import {
   TSX_COMPAT_INIT_SCRIPT,
 } from './prepare.js';
 import { findScrollTarget, scrollThrough } from './scroll.js';
-import { shootDocument, shootExpanded, shootStitched, TILE_THRESHOLD_PX, undoShootModifications, type ShotResult } from './shoot.js';
+import {
+  overlayIframes,
+  shootDocument,
+  shootDocumentStitched,
+  shootExpanded,
+  shootStitched,
+  TILE_THRESHOLD_PX,
+  undoShootModifications,
+  type ShotResult,
+} from './shoot.js';
 import { DOM_OBSERVER_INIT_SCRIPT, NetworkTracker, waitForStable, type RateLimitedResponse } from './stabilize.js';
 import { makeThumbnail } from './thumbnail.js';
+import { collectFailedRequests, DEBUG, describeEmbedsForDebug } from './embed-debug.js';
 import type { CaptureOptions, CapturePageResult, ClickTarget, ShotRecord, SiteSettings, Viewport } from './types.js';
 
 // 設計書 6.1「1ページを撮る手順」
@@ -92,6 +103,7 @@ type LoadedPage = {
   waitTimedOut: boolean;
   viewportWidth: number;
   dialog: OpenedDialog | null; // 要素を押して開いたダイアログ
+  failedRequests: string[]; // 原因を調べるための記録（SC_DEBUG=1 のときだけ集める）
 };
 
 export async function capturePage(input: CapturePageInput): Promise<CapturePageResult> {
@@ -137,18 +149,28 @@ export async function capturePage(input: CapturePageInput): Promise<CapturePageR
           if (click && loaded.dialog) loaded.dialog = await findOpenDialog(loaded.page);
         }
         const shot = await shootViewport(loaded, url, vp, input.outDir, site, options, log, click?.no);
+        if (DEBUG) {
+          const lines = [...(await describeEmbedsForDebug(loaded.page)), `失敗・エラーの通信 ${loaded.failedRequests.length} 件`, ...loaded.failedRequests.map((l) => `  ${l}`)];
+          console.log(`[埋め込みの調査] ${url}${click ? ` #click-${click.no} ${click.label}` : ''}（${vp.width}px）\n${lines.map((l) => `  ${l}`).join('\n')}`);
+        }
         if (i === 0) {
           result.httpStatus = loaded.status;
           result.finalUrl = loaded.page.url();
           if (click) {
             // 押して撮ったページは、ダイアログの名前（なければ押した要素の名前）を題名にする。リンクはたどらない
-            result.title = loaded.dialog?.title || click.label;
+            // ダイアログがなく、URL だけが変わった（SPA の詳細画面に切り替わった）場合は、ページの題名を使う
+            const routed = loaded.page.url().split('#')[0] !== url.split('#')[0];
+            result.title = loaded.dialog?.title || (routed ? await loaded.page.title() : '') || click.label;
           } else {
             result.title = await loaded.page.title();
             // 末尾までスクロールして撮り終えた後に集める。スクロールで初めて描画されるリンク（フッターなど）も拾うため
             result.links = await collectLinks(loaded.page);
             result.hasPasswordField = await hasVisiblePasswordField(loaded.page);
-            result.clickTargets = await findClickTargets(loaded.page, site.clickSelectors ?? [], site.clickByText ?? []);
+            result.clickTargets = await findClickTargets(loaded.page, site.clickSelectors ?? [], site.clickByText ?? [], site.clickImages ?? false);
+            if (site.clickImages && !result.clickTargets.some((t) => t.images)) {
+              log(`押せる画像が見つかりませんでした（${url}）。画像の様子をターミナルに出しました`);
+              console.log(`[押せる画像の調査] ${url}\n${(await describeImagesForDebug(loaded.page)).map((l) => `  ${l}`).join('\n') || '  （大きな画像は見つかりませんでした）'}`);
+            }
           }
         }
         return shot;
@@ -184,6 +206,7 @@ async function loadPage(
   await page.setViewportSize(vp);
   const network = new NetworkTracker(page);
   opened.push(network);
+  const failedRequests = DEBUG ? collectFailedRequests(page) : [];
   const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: options.pageTimeoutMs }).catch((e) => {
     // PDF や ZIP などはブラウザがダウンロードとして扱い、ページとして開けない
     if (e instanceof Error && e.message.includes('Download is starting')) throw new NotHtmlError('download');
@@ -215,7 +238,7 @@ async function loadPage(
   for (const script of scripts) await runPageScript(page, script);
   if (scripts.length > 0) stable = await waitForStable(page, network, options);
 
-  return { page, network, status, waitTimedOut: stable.timedOut, viewportWidth: vp.width, dialog: null };
+  return { page, network, status, waitTimedOut: stable.timedOut, viewportWidth: vp.width, dialog: null, failedRequests };
 }
 
 // ⑦〜⑩: スクロール領域を見つけ、末尾まで描画させてから撮る
@@ -282,7 +305,8 @@ async function shootViewport(
       shot = await shootStitched(page, target, filePath, undefined, true);
     }
   } else if (target.kind === 'document') {
-    shot = await shootDocument(page, filePath);
+    // スクロールに合わせて表示が変わるページは、スクロールしながら1画面ずつ撮ってつなぐ（サイト設定 scrollStitch）
+    shot = site.scrollStitch ? await shootDocumentStitched(page, filePath) : await shootDocument(page, filePath);
   } else {
     const expanded = await shootExpanded(page, target, filePath);
     if (expanded) {
@@ -296,6 +320,15 @@ async function shootViewport(
       shot =
         retarget.kind === 'element' ? await shootStitched(page, retarget, filePath) : await shootDocument(page, filePath);
     }
+  }
+
+  // 別のサイトを埋め込んだ iframe が白く写らないよう、iframe ごとに撮り直して重ねる（つなぎ合わせ方式は座標が違うので除く）
+  if (shot.method !== 'stitch') {
+    const overlaid = await overlayIframes(page, filePath).catch((e: Error) => {
+      log(`埋め込み（iframe）を重ねられませんでした（${vp.width}px）: ${e.message.split('\n')[0]}`);
+      return 0;
+    });
+    if (DEBUG && overlaid > 0) console.log(`[埋め込みの調査] iframe ${overlaid} 個を重ねました（${vp.width}px）`);
   }
 
   // 撮っている最中に同じサイトの通信が制限され、回復しなかった場合は、欠けた画像を残さない（設計書 5.5）

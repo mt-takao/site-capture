@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>なめらかにスクロールするページ</title>
+<style>
+  body { margin: 0; }
+  /* 中身は画面に固定した入れ物の中にあり、スクロール位置へ少しずつ追いつくように動かす（なめらかなスクロールの仕組みによくある作り） */
+  #content { position: fixed; top: 0; left: 0; right: 0; will-change: transform; }
+  #content div { height: 500px; }
+  #spacer { height: 3000px; }
+</style>
+</head>
+<body>
+<div id="content">
+  <div style="background:rgb(200,0,0)"></div>
+  <div style="background:rgb(0,160,0)"></div>
+  <div style="background:rgb(0,0,200)"></div>
+  <div style="background:rgb(200,200,0)"></div>
+  <div style="background:rgb(0,200,200)"></div>
+  <div style="background:rgb(200,0,200)"></div>
+</div>
+<div id="spacer"></div>
+<script>
+  const content = document.getElementById('content');
+  let current = 0;
+  const tick = () => {
+    const target = window.scrollY;
+    current += (target - current) * 0.05;
+    if (Math.abs(target - current) < 0.5) current = target;
+    content.style.transform = `translateY(${-current}px)`;
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+</script>
+</body>
+</html>

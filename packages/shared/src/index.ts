@@ -80,6 +80,9 @@ export type SiteSettings = {
   // 押すと送信・削除などが起きる要素を選ばないよう、自動では探さず、ここで指定したものだけを押す
   clickSelectors?: string[];
   clickByText?: string[]; // J-10: 文字列で探して押す要素（例: 'View details'）。その文字列を含むリンク・ボタンを押す
+  clickImages?: boolean; // J-10: 押せる画像（サムネイルなど）を自動で見つけて押す。別のページへのリンクと小さなアイコンは除く
+  // スクロールしながら1画面ずつ撮ってつなぐ（スクロールに合わせて表示が変わるページ向け。設計書 6.4.2）
+  scrollStitch?: boolean;
   concurrency?: number; // C-11 の上書き
   intervalMs?: number; // C-11 の上書き
 };

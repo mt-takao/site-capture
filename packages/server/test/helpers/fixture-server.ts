@@ -31,6 +31,19 @@ export async function startFixtureServer(): Promise<{ origin: string; close: () 
         `<!doctype html><title>ほかのサイトの429</title><h1>ほかのサイトの画像が 429 を返すページ</h1><img src="http://localhost:${port}/api/limited" alt="">`,
       );
     }
+    // ほかのサイト（localhost）のページを、画面の外（下のほう）に iframe で埋め込んだページ
+    if (path === '/cross-site-iframe.html') {
+      const port = (req.headers.host ?? '').split(':')[1];
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      return void res.end(
+        `<!doctype html><title>ほかのサイトの埋め込み</title><body style="margin:0"><div style="height:1500px;background:#eee"></div>` +
+          `<iframe src="http://localhost:${port}/iframe-inner" style="display:block;width:600px;height:400px;border:0"></iframe><div style="height:600px"></div></body>`,
+      );
+    }
+    if (path === '/iframe-inner') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      return void res.end('<!doctype html><body style="margin:0;background:rgb(220,30,30)"><h1>埋め込まれたページ</h1></body>');
+    }
     if (path === '/poll') return void res.end('ok');
     if (path === '/api/limited') {
       res.writeHead(429, { 'retry-after': '1' });
